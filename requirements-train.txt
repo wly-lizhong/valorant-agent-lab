@@ -1,0 +1,7 @@
+# Install the matching CPU/CUDA torch wheel first; see docs/server.md.
+# Direct training dependencies are pinned. Platform-specific torch dependencies
+# are resolved by pip and recorded in each run's package manifest.
+-r requirements.lock.txt
+torch==2.8.0
+stable-baselines3==2.9.2
+tensorboard==2.21.0

@@ -1,0 +1,27 @@
+VALORANT Agent Lab
+Copyright (C) 2026 VALORANT Agent Lab contributors
+
+This repository contains modifications and integration code for CA-VAL-AIM
+v2.11.0, Copyright (C) 2026 Pyromesis and contributors.
+https://github.com/Pyromesis/CA-VAL-AIM
+
+CA-VAL-AIM is a modified version of ValTrainer, Copyright (C) 2026 ValTrainer
+contributors, https://github.com/idoraz1/ValTrainer.
+The original work is licensed under the GNU General Public License, version 3
+or later. These attribution and license terms are preserved.
+
+Changes in this repository (2026): isolated training startup, fixed-step
+navigation episodes, local JSON/RGB bridge, Gymnasium adapter, PPO commands,
+pinned bootstrap tooling, asset integrity utilities, tests and documentation.
+The exact upstream version, source URL and archive checksum are recorded in
+dependencies.lock.json. scripts/bootstrap.py applies the complete overlay and
+source patches in this repository to that source. The generated upstream copy
+retains its original LICENSE, NOTICE and CREDITS.
+
+Code in this repository is offered under GPL-3.0-or-later. See LICENSE.
+Godot and .NET retain their respective licenses and are downloaded separately.
+
+Optional VALORANT map assets are not covered by this code license and are not
+distributed in this repository. They remain the property of their respective
+rights holders, including Riot Games, Inc. VALORANT is a trademark of Riot Games,
+Inc. This project is not affiliated with or endorsed by Riot Games.

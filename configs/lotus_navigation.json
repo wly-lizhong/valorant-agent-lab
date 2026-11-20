@@ -1,0 +1,18 @@
+{
+  "id": "lotus-short-v1",
+  "map": "lotus",
+  "start": [-18.0, 0.0, 30.5],
+  "start_yaw": 10.6,
+  "goal": [-17.26, 0.0, 26.57],
+  "goal_radius": 0.8,
+  "yaw_jitter": 5.0,
+  "max_steps": 300,
+  "physics_hz": 60,
+  "action_repeat": 6,
+  "width": 160,
+  "height": 90,
+  "render_width": 640,
+  "render_height": 360,
+  "goal_marker": true,
+  "require_real_map": true
+}

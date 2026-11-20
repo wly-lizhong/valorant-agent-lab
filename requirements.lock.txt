@@ -1,0 +1,7 @@
+# Tested base environment; PyTorch/CUDA is installed separately for the target driver.
+gymnasium==1.4.0
+numpy==2.2.6
+Pillow==12.3.0
+cloudpickle==3.1.3
+farama-notifications==0.0.6
+typing-extensions==4.16.0

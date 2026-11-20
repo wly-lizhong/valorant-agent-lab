@@ -1,0 +1,23 @@
+{
+  "upstream": {
+    "repository": "https://github.com/Pyromesis/CA-VAL-AIM",
+    "tag": "v2.11.0",
+    "commit": "1d6003158054d6a5762f62faf7e18eeffd5dafe3",
+    "url": "https://api.github.com/repos/Pyromesis/CA-VAL-AIM/zipball/v2.11.0",
+    "sha256": "22e0e3ca0279bfe4f16141e5b06e9260dd1ebd497e912d0231e018006e69695a"
+  },
+  "godot_version": "4.7.2",
+  "godot_linux": {
+    "url": "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_mono_linux_x86_64.zip",
+    "sha256": "129f82db7bafd54ae14bb5bb284041c73860e8c7a009a3a026ca5e946cbff247"
+  },
+  "godot_windows": {
+    "url": "https://github.com/godotengine/godot-builds/releases/download/4.7.2-stable/Godot_v4.7.2-stable_mono_win64.zip",
+    "sha256": "a2a48473a7414c5f19fab690518caebb738c09ef9601f6bd2388676a7f53b3c0"
+  },
+  "dotnet_linux": {
+    "version": "8.0.428",
+    "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.428/dotnet-sdk-8.0.428-linux-x64.tar.gz",
+    "sha512": "33212bb99a2bf003973d41106c7e8fe94208a12958ff601d4a476be379403c85a7dc9183a6ec64dfb44ded7102965be09f35add1758e68e9251bae7891d7b7bf"
+  }
+}
