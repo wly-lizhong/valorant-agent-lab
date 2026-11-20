@@ -3,7 +3,6 @@
 .cache/
 .venv*/
 external/
-assets/
 runs/
 checkpoints/
 __pycache__/
@@ -24,3 +23,9 @@ bin/
 obj/
 local.json
 assets.local.json
+
+# Publish only the reviewed Lotus bundle; extracted maps stay local.
+/assets/*
+!/assets/lotus-assets.zip
+!/assets/lotus-assets.sha256
+!/assets/NOTICE.md

@@ -21,7 +21,7 @@ retains its original LICENSE, NOTICE and CREDITS.
 Code in this repository is offered under GPL-3.0-or-later. See LICENSE.
 Godot and .NET retain their respective licenses and are downloaded separately.
 
-Optional VALORANT map assets are not covered by this code license and are not
-distributed in this repository. They remain the property of their respective
+The Lotus map archive in assets/ is not covered by this code license. Its source
+and attribution are documented in assets/NOTICE.md. Map assets remain the property of their respective
 rights holders, including Riot Games, Inc. VALORANT is a trademark of Riot Games,
 Inc. This project is not affiliated with or endorsed by Riot Games.

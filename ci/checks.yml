@@ -34,5 +34,5 @@ jobs:
           dotnet-version: '8.0.x'
       - run: python scripts/bootstrap.py --source-only
       - run: dotnet build external/CA-VAL-AIM/CaValAim/CaValAim.csproj --nologo
-      # Real-map rendering requires separately supplied assets; it is not
-      # replaced by a fake engine in this compilation-only job.
+      # This job checks compilation only. It does not unpack the bundled map
+      # or perform real-map rendering; run smoke separately for that check.

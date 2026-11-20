@@ -9,7 +9,7 @@ bash scripts/setup_ubuntu.sh
 source .venv/bin/activate
 ```
 
-使用 [地图说明](assets.md) 配置地图后安装训练依赖。先检查 `nvidia-smi`，选择驱动支持的 PyTorch 构建。下面给出固定 2.8.0 的 CUDA 12.8 示例：
+代码克隆后已包含地图包，按 [地图说明](assets.md) 校验解包并配置 `maps_dir`，无需另外上传地图。然后安装训练依赖。先检查 `nvidia-smi`，选择驱动支持的 PyTorch 构建。下面给出固定 2.8.0 的 CUDA 12.8 示例：
 
 ```bash
 pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cu128

@@ -17,7 +17,7 @@
 
 ## 服务器开始使用
 
-先取得自己有权使用的地图资源包，见 [地图迁移说明](docs/assets.md)。代码和资源分开保存，GitHub 仓库不包含地图、引擎二进制或模型权重。
+仓库已包含约 74 MB 的莲华古城地图包，`git clone` 会一起下载，无需另外传文件或配置 Git LFS。地图资源归属见 [资源说明](assets/NOTICE.md)，安装方法见 [地图说明](docs/assets.md)。引擎和模型权重单独准备。
 
 ```bash
 git clone https://github.com/wly-lizhong/valorant-agent-lab.git
@@ -26,7 +26,7 @@ bash scripts/setup_ubuntu.sh
 source .venv/bin/activate
 ```
 
-将本机准备好的 `lotus-assets.zip` 放在仓库的 `assets/` 下，再校验安装：
+克隆完成后，直接校验并解包仓库自带的地图：
 
 ```bash
 python scripts/assets.py install --archive assets/lotus-assets.zip \
@@ -68,7 +68,7 @@ bash scripts/run_linux.sh evaluate --device cuda \
 | `requirements*.txt` | Python 基础依赖及训练依赖版本 |
 | `docs/` | 服务器、资源和接口说明 |
 
-`external/`、`.tools/`、`local.json`、`assets/`、`runs/` 都是本机生成内容，不提交 Git。每次训练记录配置及主要库版本。Python 平台相关间接依赖由 pip 解析，若要严格复现实验，还应保存本次 `pip freeze`、驱动和硬件信息。
+`assets/` 仅跟踪地图 ZIP、SHA-256 文件和资源说明；解包后的地图保存在 `assets/maps-data/`，不提交 Git。`external/`、`.tools/`、`local.json` 和 `runs/` 也只保存在本机。每次训练记录配置及主要库版本。Python 平台相关间接依赖由 pip 解析，若要严格复现实验，还应保存本次 `pip freeze`、驱动和硬件信息。
 
 ## 开发与验证
 
@@ -79,7 +79,7 @@ python scripts/bootstrap.py
 bash scripts/run_linux.sh smoke
 ```
 
-`ci/checks.yml` 提供 Python 协议测试和 C# 编译的 GitHub Actions 模板，当前未启用。具备 workflow 写入权限后可将它放入 `.github/workflows/`。由于仓库没有地图，即使 CI 通过也不代表真实地图渲染验收。实际运行记录见 [验证说明](docs/validation.md)。观察和动作定义见 [环境接口](docs/environment.md)。
+`ci/checks.yml` 提供 Python 协议测试和 C# 编译的 GitHub Actions 模板，当前未启用。具备 workflow 写入权限后可将它放入 `.github/workflows/`。模板未执行地图解包和渲染，因此 CI 通过也不代表真实地图渲染验收。实际运行记录见 [验证说明](docs/validation.md)。观察和动作定义见 [环境接口](docs/environment.md)。
 
 修改 overlay 后重跑 `bootstrap.py`；它只更新 `external/` 内生成的副本，保留原始下载和已安装的训练器。更换上游版本需要一起更新哈希、补丁锚点和实际地图检查。
 
