@@ -4,6 +4,21 @@
 
 这是训练环境和 PPO 基线代码，尚未提供训练好的游戏智能体。运行时不需要安装 VALORANT。
 
+## 研究与后续路线
+
+[研究文档目录](docs/research/README.md)集中说明项目目标、参考依据、设计取舍和计划。当前方向是先在 Lotus 上实现移动与交战，再扩展跟队、守点和基础爆破回合；这些仍是后续计划，不属于下方已实现能力。
+
+| 文档 | 内容 |
+| --- | --- |
+| [目标、现状与路线图](docs/research/project-status-and-roadmap.md) | 第一阶段 1A/1B/1C、工作包、依赖和拟定验收门槛 |
+| [CS:GO 与具身智能参考](docs/research/reference-projects.md) | 视觉模仿学习、MLMove、ACT、Diffusion Policy、RTC、OpenVLA、GR00T 的用途和限制 |
+| [系统与训练架构](docs/research/system-design.md) | 玩家信息约束、视觉策略、实时控制、动作语义和迁移 |
+| [数据、训练与评估规范](docs/research/data-training-evaluation.md) | 示范录制、纠错、奖励、留出评估及服务器复现 |
+| [决策与待验证事项](docs/research/decisions.md) | 为什么选择当前路线、暂缓什么、何时调整 |
+| [教学手册](docs/research/beginner-guide.md) / [来源与评论台账](docs/research/teaching-source-ledger.md) / [20 张训练卡](docs/research/training-task-cards.md) | 基础游戏行为、公开教学与社区证据、可训练场景设计 |
+
+参考项目的论文成绩与本项目成绩分开记录；未完整观看的视频和未取得的评论均注明读取范围。文档不会把短程 smoke 测试写成模型已经学会游戏。
+
 ## 当前能力
 
 - Gymnasium `reset / step` 接口；160×90 RGB 图像，PPO 使用连续 4 帧。
