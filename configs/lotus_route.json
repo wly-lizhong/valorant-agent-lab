@@ -1,0 +1,92 @@
+{
+  "id": "lotus-route-v1",
+  "family": "lotus-a-root-entry-v1",
+  "task": "Follow A Root toward the A entrance. Stop to engage visible enemies, reload as needed, then continue to the entrance.",
+  "mode": "move_combat",
+  "map": "lotus",
+  "start": [
+    -18.0,
+    0.0,
+    30.5
+  ],
+  "start_yaw": 10.6,
+  "start_pitch": 0,
+  "start_jitter": 0.2,
+  "yaw_jitter": 12,
+  "waypoints": [
+    [
+      -17.26,
+      0,
+      26.57
+    ],
+    [
+      -16,
+      0,
+      23
+    ],
+    [
+      -13,
+      0,
+      21
+    ],
+    [
+      -13,
+      0,
+      17
+    ],
+    [
+      -13,
+      0,
+      11.5
+    ]
+  ],
+  "goal": [
+    -13,
+    0,
+    11.5
+  ],
+  "goal_radius": 1.1,
+  "enemies": [
+    [
+      -14,
+      0,
+      18
+    ]
+  ],
+  "enemy_probability": 0.0,
+  "enemy_fire": false,
+  "enemy_tier": 0,
+  "initial_ammo": 25,
+  "max_steps": 1200,
+  "physics_hz": 60,
+  "action_repeat": 3,
+  "yaw_bins": [
+    -12,
+    -4,
+    -1,
+    -0.25,
+    0,
+    0.25,
+    1,
+    4,
+    12
+  ],
+  "pitch_bins": [
+    -12,
+    -4,
+    -1,
+    -0.25,
+    0,
+    0.25,
+    1,
+    4,
+    12
+  ],
+  "width": 256,
+  "height": 144,
+  "render_width": 960,
+  "render_height": 540,
+  "player_hud": true,
+  "goal_marker": false,
+  "require_real_map": true
+}

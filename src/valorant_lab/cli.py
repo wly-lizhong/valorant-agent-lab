@@ -7,6 +7,9 @@ import time
 import numpy as np
 from PIL import Image
 from .env import ROOT, NOOP, ValorantNavigationEnv, validate_assets
+from .scenario import load_scenario, require_contract
+
+DEFAULT_TASK = ROOT / "configs/lotus_movement_combat.json"
 
 
 def smoke(args):
@@ -19,7 +22,7 @@ def smoke(args):
             raise RuntimeError("RGB observation appears blank; inspect the rendering display")
         Image.fromarray(first).save(output / "reset.png")
         initial_position = np.array(info["position"])
-        action = NOOP.copy()
+        action = env.noop.copy()
         action[0] = 1
         total_reward = 0.0
         transitions = []
@@ -38,7 +41,7 @@ def smoke(args):
             raise RuntimeError("Simulation advanced outside controlled steps")
         # A second episode exercises fast reset and firing.
         env.reset(seed=args.seed)
-        fire = NOOP.copy()
+        fire = env.noop.copy()
         fire[6] = 1
         _, _, _, _, fire_info = env.step(fire)
         if fire_info["ammo"] >= 25:
@@ -65,17 +68,25 @@ def make_vector_env(scenario, count, seed):
 def train(args):
     import torch
     from stable_baselines3 import PPO
-    from stable_baselines3.common.callbacks import CheckpointCallback
+    from .learning import POLICY_KWARGS, TrainingCallback, metadata, save_model
     torch.set_num_threads(args.cpu_threads)
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
-    scenario = Path(args.scenario).resolve() if args.scenario else ROOT / "configs/lotus_navigation.json"
-    manifest = {"scenario": json.loads(scenario.read_text()), "seed": args.seed,
+    scenario = Path(args.scenario).resolve()
+    config = load_scenario(scenario)
+    parent_meta = require_contract(args.resume or args.init_bc, config) if args.resume or args.init_bc else {}
+    if args.init_bc and parent_meta.get("kind") != "bc":
+        raise ValueError("--init-bc requires a BC checkpoint; use --resume for PPO")
+    if args.resume and parent_meta.get("kind") != "ppo":
+        raise ValueError("--resume requires PPO; use --init-bc for a BC checkpoint")
+    manifest = {"scenario": config, "seed": args.seed,
         "device": args.device, "environments": args.envs, "additional_timesteps": args.steps,
-        "resume": args.resume, "packages": {p: importlib.metadata.version(p)
+        "resume": args.resume, "init_bc": args.init_bc, "packages": {p: importlib.metadata.version(p)
             for p in ["torch", "gymnasium", "stable-baselines3", "numpy"]}}
     (output / ("run-" + str(time.time_ns()) + ".json")).write_text(json.dumps(manifest, indent=2))
     env = make_vector_env(scenario, args.envs, args.seed)
+    meta = metadata(config, "ppo", episodes=parent_meta.get("episodes", []),
+                    test_only=parent_meta.get("test_only", False), parent=args.resume or args.init_bc)
     model = None
     try:
         if args.resume:
@@ -84,35 +95,44 @@ def train(args):
         else:
             model = PPO("CnnPolicy", env, n_steps=args.rollout, batch_size=args.batch_size,
                 n_epochs=4, learning_rate=3e-4, gamma=0.99, seed=args.seed,
-                device=args.device, verbose=1, tensorboard_log=str(output / "tensorboard"))
-        callback = CheckpointCallback(save_freq=max(args.checkpoint_every // args.envs, 1),
-            save_path=str(output / "checkpoints"), name_prefix="ppo_navigation")
+                policy_kwargs=POLICY_KWARGS, device=args.device, verbose=1, tensorboard_log=str(output / "tensorboard"))
+            if args.init_bc:
+                teacher = PPO.load(args.init_bc, device=args.device)
+                model.policy.load_state_dict(teacher.policy.state_dict())
+                del teacher
+        callback = TrainingCallback(output, meta, args)
         model.learn(total_timesteps=args.steps, callback=callback, reset_num_timesteps=not bool(args.resume))
     except KeyboardInterrupt:
         print("Interrupted; saving the current checkpoint.")
     finally:
         if model is not None:
-            model.save(output / "latest")
+            save_model(model, output / "latest.zip", meta)
         env.close()
 
 
 def evaluate(args):
-    from stable_baselines3 import PPO
-    env = make_vector_env(args.scenario, 1, args.seed)
-    try:
-        model = PPO.load(args.model, env=env, device=args.device)
-        observation = env.reset()
-        records = []
-        while len(records) < args.episodes:
-            action, _ = model.predict(observation, deterministic=True)
-            observation, _, done, info = env.step(action)
-            if done[0]:
-                records.append({"success": bool(info[0].get("is_success")),
-                    "episode": info[0].get("episode"), "distance": info[0].get("distance_to_goal")})
-        print(json.dumps({"success_rate": sum(x["success"] for x in records) / len(records),
-            "episodes": records}, indent=2))
-    finally:
-        env.close()
+    from .evaluation import evaluate as run
+    run(args)
+
+
+def record(args):
+    from .recording import record as run
+    run(args)
+
+
+def bc_train(args):
+    from .learning import bc_train as run
+    run(args)
+
+
+def queue(args):
+    from .corrections import list_queue
+    list_queue(args)
+
+
+def replay(args):
+    from .replay import replay as run
+    run(args)
 
 
 def doctor(args):
@@ -146,32 +166,76 @@ def main():
     smoke_parser.add_argument("--steps", type=int, default=16)
     smoke_parser.set_defaults(func=smoke)
     training = commands.add_parser("train")
-    training.add_argument("--output", default="runs/ppo-navigation")
+    training.add_argument("--output", default="runs/ppo-movement-combat")
     training.add_argument("--steps", type=int, default=100000)
     training.add_argument("--envs", type=int, default=1)
     training.add_argument("--rollout", type=int, default=256)
     training.add_argument("--batch-size", type=int, default=64)
     training.add_argument("--cpu-threads", type=int, default=4)
     training.add_argument("--checkpoint-every", type=int, default=10000)
-    training.add_argument("--resume")
+    initial = training.add_mutually_exclusive_group()
+    initial.add_argument("--resume")
+    initial.add_argument("--init-bc")
+    training.add_argument("--eval-every", type=int, default=25000, help="Development evaluation interval; 0 disables")
+    training.add_argument("--eval-episodes", type=int, default=3)
     training.add_argument("--device", default="auto")
     training.set_defaults(func=train)
     evaluation = commands.add_parser("evaluate")
     evaluation.add_argument("--model", required=True)
     evaluation.add_argument("--episodes", type=int, default=10)
     evaluation.add_argument("--device", default="auto")
+    evaluation.add_argument("--cpu-threads", type=int, default=4)
+    evaluation.add_argument("--output", default="runs/evaluation")
+    evaluation.add_argument("--split", choices=["dev", "validation", "test"], default="dev")
+    evaluation.add_argument("--queue", help="Deduplicated correction queue; development split only")
+    evaluation.add_argument("--case", help="Re-evaluate one correction case from its original seed")
+    evaluation.add_argument("--realtime", action="store_true", help="Keep simulation running during inference")
+    evaluation.add_argument("--save-frames", action="store_true")
     evaluation.set_defaults(func=evaluate)
-    for sub in (smoke_parser, training, evaluation):
-        sub.add_argument("--scenario", help="Scenario JSON (default: configs/lotus_navigation.json)")
+    recording = commands.add_parser("record", help="本地键鼠示范采集")
+    recording.add_argument("--output", default="runs/demonstrations")
+    recording.add_argument("--episodes", type=int, default=1)
+    recording.add_argument("--split", choices=["train", "validation"], default="train")
+    recording.add_argument("--case")
+    recording.add_argument("--mouse-scale", type=float, default=.08, help="Degrees per relative mouse pixel before quantization")
+    recording.set_defaults(func=record)
+    bc = commands.add_parser("bc-train", help="从画面与动作训练，可在无游戏进程的云服务器运行")
+    bc.add_argument("--data", required=True)
+    bc.add_argument("--output", default="runs/bc")
+    bc.add_argument("--epochs", type=int, default=10)
+    bc.add_argument("--batch-size", type=int, default=32)
+    bc.add_argument("--cpu-threads", type=int, default=4)
+    bc.add_argument("--learning-rate", type=float, default=3e-4)
+    bc.add_argument("--device", default="auto")
+    bc.add_argument("--allow-test-data", action="store_true", help="Pipeline checks only; marks model test_only")
+    bc.set_defaults(func=bc_train)
+    questions = commands.add_parser("queue", help="列出系统生成的人工纠错任务")
+    questions.add_argument("--queue", default="runs/ppo-movement-combat/corrections")
+    questions.set_defaults(func=queue)
+    playback = commands.add_parser("replay", help="按原始种子和动作重放示范，检查状态一致性")
+    playback.add_argument("--episode", required=True)
+    playback.add_argument("--output", default="runs/replay")
+    playback.add_argument("--paced", action="store_true")
+    playback.set_defaults(func=replay)
+    for sub in (smoke_parser, training, evaluation, recording, bc):
+        sub.add_argument("--scenario", default=str(ROOT / "configs/lotus_navigation.json") if sub is smoke_parser else str(DEFAULT_TASK),
+                         help="Scenario JSON; smoke defaults to navigation self-test, other commands to movement/combat")
         sub.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every"):
+    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every", "epochs", "eval_episodes"):
         if hasattr(args, name) and getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.command == "train" and args.rollout * args.envs < args.batch_size:
         parser.error("rollout * envs must be >= batch-size")
     if args.command == "train" and (args.rollout * args.envs < 2 or args.batch_size < 2):
         parser.error("PPO advantage normalization requires at least two samples and batch-size >= 2")
+    if hasattr(args, "eval_every") and args.eval_every < 0:
+        parser.error("--eval-every must be nonnegative")
+    if hasattr(args, "seed") and not 0 <= args.seed < 100000:
+        parser.error("--seed must be in [0, 100000)")
+    for name in ("learning_rate", "mouse_scale"):
+        if hasattr(args, name) and (not np.isfinite(getattr(args, name)) or getattr(args, name) <= 0):
+            parser.error(f"--{name.replace('_', '-')} must be positive and finite")
     args.func(args)
 
 

@@ -57,11 +57,14 @@ def main() -> None:
     cache = ROOT / ".cache"
     cache.mkdir(exist_ok=True)
     upstream = lock["upstream"]
+    upstream_dir = ROOT / "external" / "CA-VAL-AIM"
+    stamp = upstream_dir / ".agent-lab-source.json"
+    source_ready = stamp.exists() and json.loads(stamp.read_text())["sha256"] == upstream["sha256"]
     source_zip = args.source_archive or cache / "upstream-v2.11.0.zip"
     if args.source_archive:
         if checksum(source_zip) != upstream["sha256"]:
             raise ValueError("Local source archive differs from pinned archive")
-    else:
+    elif not source_ready or args.download_only:
         fetch(upstream["url"], source_zip, upstream["sha256"])
     godot_spec = lock["godot_" + target_os]
     godot_zip = cache / f"godot-{target_os}.zip"
@@ -76,8 +79,6 @@ def main() -> None:
         return
     if (target_os == "windows") != (os.name == "nt"):
         raise ValueError("Run extraction/build on the target OS (download-only supports cross-platform)")
-    upstream_dir = ROOT / "external" / "CA-VAL-AIM"
-    stamp = upstream_dir / ".agent-lab-source.json"
     if not stamp.exists():
         if upstream_dir.exists() and any(upstream_dir.iterdir()):
             raise ValueError("Unrecognized upstream directory; preserving it")
@@ -101,6 +102,8 @@ def main() -> None:
     patch_once(game_file, anchor, anchor + "\n        if (AgentControlled && !agentTicking) return;")
     anchor = "public override void _Input(InputEvent e)\n    {"
     patch_once(game_file, anchor, anchor + "\n        if (AgentControlled) return;")
+    patch_once(game_file, "Mode.EffectiveInfiniteAmmo, Mode.EffectiveInfiniteReserve, Mode.Movement);",
+               "Mode.EffectiveInfiniteAmmo, AgentControlled ? false : Mode.EffectiveInfiniteReserve, Mode.Movement);")
     if args.source_only:
         print("Pinned upstream source and overlay prepared")
         return

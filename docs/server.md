@@ -43,6 +43,8 @@ DISPLAY= bash scripts/run_linux.sh smoke
 
 ## 正式训练、恢复和日志
 
+推荐先在有显示器的机器录制，复制数据到云端运行 `bc-train`，再初始化 PPO；具体流程见[第一阶段手册](stage1-guide.md)。离线 BC 无需运行 Godot，也无需 `DISPLAY`。下面的 PPO 默认是新的移动交战任务，短训只检查工具链，不代表能力达标。
+
 ```bash
 bash scripts/run_linux.sh train --device cuda --steps 100000 \
   --output runs/lotus-v1 --checkpoint-every 10000
@@ -56,7 +58,7 @@ bash scripts/run_linux.sh train --device cuda --steps 100000 \
 
 首次长任务建议保留 `--envs 1`，确认内存、CPU 和采样速度后再增加。每个环境有独立进程、随机端口和数据目录。每 10,000 个采样步保存 checkpoint；正常退出或 Ctrl+C 保存 `latest.zip`。进程被强杀/断电时使用此前 checkpoint。
 
-训练保存优化器与采样步数；恢复不会恢复旧场景和全部随机数状态，所以不是逐比特继续。改场景、观察尺寸或动作空间时建立新实验。当前训练任务容易，长期奖励增长不代表学会完整比赛。
+训练保存优化器与采样步数；恢复不会恢复旧场景和全部随机数状态，所以不是逐比特继续。同名 JSON 契约文件必须与模型一起保留；旧版没有契约的导航权重需重新训练。默认每 25,000 步执行开发评估并归集纠错题，`--eval-every 0` 可关闭。长期奖励增长不代表学会完整比赛。
 
 ## 更新代码
 
@@ -80,8 +82,11 @@ bash scripts/run_linux.sh smoke
 py -3.11 -m venv .venv
 .\.venv\Scripts\python -m pip install -r requirements.lock.txt
 .\.venv\Scripts\python -m pip install -e . --no-deps
-.\.venv\Scripts\python scripts/bootstrap.py --maps-dir 'TRAINER_ROOT'
+.\.venv\Scripts\python scripts/assets.py install --archive assets/lotus-assets.zip --sha256 309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
+.\.venv\Scripts\python scripts/bootstrap.py --maps-dir assets/maps-data
 .\.venv\Scripts\python -m valorant_lab.cli smoke
+.\.venv\Scripts\python -m pip install -e '.[collect]'
+.\.venv\Scripts\python -m valorant_lab.cli record --scenario configs/lotus_route.json
 ```
 
 训练依赖同上，用 `.\.venv\Scripts\python -m pip` 安装 CPU/CUDA wheel。Windows 和 WSL 使用各自 checkout 或重新生成 `local.json`；该文件的可执行文件和地图路径不能跨系统共用。当前真实引擎验收在 WSL Ubuntu 24.04 完成，原生 Windows 启动路径仍需单独实测。

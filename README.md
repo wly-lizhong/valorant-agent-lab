@@ -1,107 +1,113 @@
 # VALORANT Agent Lab
 
-基于 [CA-VAL-AIM](https://github.com/Pyromesis/CA-VAL-AIM) 的视觉 FPS 智能体项目，使用莲华古城（Lotus）地图资源。目标是让智能体依据第一人称画面、可见 HUD 和事先公开的任务，连续完成移动、观察、射击与基本攻防职责。
+基于 [CA-VAL-AIM](https://github.com/Pyromesis/CA-VAL-AIM) 的视觉 FPS 智能体训练项目，使用莲华古城（Lotus）真实地图资源。运行独立训练器不需要安装官方 VALORANT。
 
-当前已接通环境控制、图像观察和 PPO 导航基线，尚未提供训练好的游戏智能体。运行这个独立环境不需要安装 VALORANT。
+**当前版本提供第一阶段的环境和学习工具：沿路线移动 → 处理可见敌人 → 必要时换弹 → 继续到达目的地。尚未提供训练成熟、能流畅参战的模型。** 工程验证、学习效果和实时性能分别报告，见[验证记录](docs/validation.md)。
 
-## 首个正式训练目标
+## 第一阶段现在能做什么
 
-**在 Lotus 的一段真实地图区域，完成“沿路线移动 → 遇到可见敌人 → 停稳瞄准并射击 → 必要时换弹 → 恢复行进”的连续闭环。** 固定角色和一把步枪，先不使用技能；场景包含拐角、掩体、无敌人路段以及走偏后的恢复。具体区域和武器在实施前锁定。
-
-第一阶段按以下顺序推进，表中能力均为**待实现和验收的计划**：
-
-| 里程碑 | 智能体要完成的行为 | 交付与验收重点 |
-| --- | --- | --- |
-| 1A 移动与交战 | 转弯、观察、停稳射击、换弹、交战后继续原任务 | 可训练场景、同步示范、模型和原速录像；分别检查单项、组合及失败恢复 |
-| 1B 跟队与守点 | 攻方跟随可见队友；守方到固定位置观察入口，交战后恢复职责 | 跟丢能找回、不过度贴人堵路、不会打完就停住 |
-| 1C 基础爆破回合 | 携包、安装、守包、回防、拆除及死亡重置 | 先少量角色跑通回合，再加入脚本队友和对手形成简化 5v5 |
-
-1A 的正式训练与验收使用地图本身的地标和公开的固定目的地，不依赖额外的青色路标或透视提示；基础弹药、血量等信息通过画面中的 HUD 提供。具体数据、奖励和验收条件见[路线图](docs/research/project-status-and-roadmap.md)及[数据与评估规范](docs/research/data-training-evaluation.md)。
-
-移动、停稳精度和枪械行为的基线检查放在正式示范采集之前；完整的官方客户端对照校准在后续逐项推进。环境音、技能、更多武器与外接键鼠后端按后续阶段扩展，CPU/低配显卡优化放在能力基线之后。
-
-## 研究与后续路线
-
-[研究文档目录](docs/research/README.md)集中说明项目目标、参考依据、设计取舍和计划。当前方向是先在 Lotus 上实现移动与交战，再扩展跟队、守点和基础爆破回合；这些仍是后续计划，不属于下方已实现能力。
-
-| 文档 | 内容 |
+| 能力 | 当前实现 |
 | --- | --- |
-| [目标、现状与路线图](docs/research/project-status-and-roadmap.md) | 第一阶段 1A/1B/1C、工作包、依赖和拟定验收门槛 |
-| [CS:GO 与具身智能参考](docs/research/reference-projects.md) | 视觉模仿学习、MLMove、ACT、Diffusion Policy、RTC、OpenVLA、GR00T 的用途和限制 |
-| [系统与训练架构](docs/research/system-design.md) | 玩家信息约束、视觉策略、实时控制、动作语义和迁移 |
-| [数据、训练与评估规范](docs/research/data-training-evaluation.md) | 示范录制、纠错、奖励、留出评估及服务器复现 |
-| [决策与待验证事项](docs/research/decisions.md) | 为什么选择当前路线、暂缓什么、何时调整 |
-| [教学手册](docs/research/beginner-guide.md) / [来源与评论台账](docs/research/teaching-source-ledger.md) / [20 张训练卡](docs/research/training-task-cards.md) | 基础游戏行为、公开教学与社区证据、可训练场景设计 |
+| 正式任务 | Lotus A Root 到 A 入口的一段约 20 米路线；多个无可见标记的路线检查点；固定 Vandal |
+| 交战 | 复用上游 Bot 的模型、命中、伤害、遮挡与回击；固定位置的弱对手；混入无敌人回合 |
+| 完成判定 | 经过路线检查点、击杀本回合生成的敌人，并回到/到达终点；击杀不会单独结束任务 |
+| 观察 | 256×144 第一人称 RGB；基础 HP、护盾、弹药及换弹 HUD；最近 4 帧 |
+| 操作 | 移动、静步/蹲伏、跳跃、开火、换弹；水平/垂直最小非零视角增量 0.25° |
+| 人工数据 | 本地中文录制窗口；场景/种子、动作、时间和诊断记录；分块存储、确认保存和动作重放 |
+| 学习 | 离线行为克隆（BC）；BC 权重初始化 PPO；PPO 存档与恢复；模型与数据的控制契约检查 |
+| 纠错 | 开发评估自动生成去重题目；按原种子从回合起点重做；示范通过与模型复测通过分别记录 |
+| 时钟 | 训练使用精确步进；独立实时评估让世界在推理期间继续运行，报告超时、丢时与按键释放 |
 
-参考项目的论文成绩与本项目成绩分开记录；未完整观看的视频和未取得的评论均注明读取范围。文档不会把短程 smoke 测试写成模型已经学会游戏。
+策略只读取画面。坐标、敌人数量、路线进度等后台字段只用于评分、诊断与测试，不进入学习模型。首版任务固定，模型尚未接入图像目标导航、长期路线记忆或战术状态机。
 
-## 当前实现与环境自检
+`configs/lotus_navigation.json` 中约 4 米的青色立柱任务继续保留为环境自检。**`smoke` 默认用它；`train`、`record`、`bc-train`、`evaluate` 默认用正式移动交战配置。** 旧版导航模型不能直接加载到新动作协议。
 
-- Gymnasium `reset / step` 接口；160×90 RGB 图像，PPO 使用连续 4 帧。
-- 前后左右移动、走路/蹲伏、转视角、跳跃、开枪、换弹动作。
-- 固定 60 Hz 模拟；默认每次动作推进 6 个模拟子步。
-- 真实地图缺失时明确报错，避免意外在简化地图上训练。
-- PPO 训练、TensorBoard、定期存档、断点继续和评估入口。
-- Ubuntu 22.04/24.04 x86_64 服务器脚本；Windows 本地启动入口。
+## 推荐使用顺序
 
-`configs/lotus_navigation.json` 保留约 4 米、带青色立柱的短路线，作为**环境连通性自检场景**：检查地图加载、画面、动作、奖励、重置及训练存档链路。通过它只代表基础管线可运行，不能作为 1A 的训练成果或基础参战能力验收。
+1. 准备地图和引擎，完成自检、机制检查。
+2. 先人工试玩路线/射击课程，录制少量训练和验证示范，并检查重放。
+3. 将数据复制到云服务器，训练 BC，独立评估整段任务。
+4. 按失败队列补课，混合正常示范重新训练；再比较 PPO 微调收益。
+5. 在实际目标硬件上做实时评估，随后扩展跟队、守点和爆破回合。
 
-**当前默认 `train` 仍运行这份导航配置。** 1A 所需的交战任务与奖励、基础 HUD、细粒度瞄准和独立实时运行尚未接入。移动和枪械继续使用上游模拟；地图外观接近并不代表移速、停止和后坐力已经与官方客户端一致。后续实施将保留自检配置，并另建正式任务配置和评估集。
+详细操作见[第一阶段使用手册](docs/stage1-guide.md)。
 
-## 服务器开始使用
+## Ubuntu 服务器准备
 
-仓库已包含约 74 MB 的莲华古城地图包，`git clone` 会一起下载，无需另外传文件或配置 Git LFS。地图资源归属见 [资源说明](assets/NOTICE.md)，安装方法见 [地图说明](docs/assets.md)。引擎和模型权重单独准备。
+目标为 Ubuntu 22.04/24.04 x86_64 + NVIDIA。仓库包含约 74 MB 的 Lotus 地图包，无需 Git LFS；地图归属见[资源说明](assets/NOTICE.md)。
 
 ```bash
 git clone https://github.com/wly-lizhong/valorant-agent-lab.git
 cd valorant-agent-lab
 bash scripts/setup_ubuntu.sh
 source .venv/bin/activate
-```
-
-克隆完成后，直接校验并解包仓库自带的地图：
-
-```bash
 python scripts/assets.py install --archive assets/lotus-assets.zip \
   --sha256 309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
 python scripts/bootstrap.py --maps-dir assets/maps-data --skip-build
 bash scripts/run_linux.sh smoke
 ```
 
-安装 PyTorch 2.8.0 对应的 CPU 或 CUDA 版本后安装训练依赖，具体命令见 [服务器说明](docs/server.md)：
+按[服务器说明](docs/server.md)安装 PyTorch 2.8.0 的 CPU/CUDA 版本，再安装训练依赖：
 
 ```bash
 pip install -r requirements-train.txt
 bash scripts/run_linux.sh doctor
-bash scripts/run_linux.sh train --device cuda --steps 100000
 ```
 
-先用 `smoke` 检查真实画面、移动、模拟时间及开枪，再用上面的 `train` 验证现有导航训练链路。这些命令还不训练 1A 移动交战任务。结果在 `runs/smoke/`，模型和日志默认在 `runs/ppo-navigation/`。没有 GPU 时把 `--device cuda` 改成 `--device cpu`。
+无桌面服务器可以训练。**离线 BC 只读取示范数据，无需启动游戏；PPO 和游戏评估仍需渲染进程。** `run_linux.sh` 在没有 `DISPLAY` 时使用 Xvfb + 软件渲染，这是兼容回退，不代表已启用 NVIDIA 图形加速。不要用 Godot `--headless` 生成视觉观察。
 
-## 如何继续训练
+## 本地录制 → 云端学习
+
+在有显示器、能运行训练器的机器上安装录制依赖：
 
 ```bash
-bash scripts/run_linux.sh train --device cuda --steps 100000 \
-  --resume runs/ppo-navigation/latest.zip
-bash scripts/run_linux.sh evaluate --device cuda \
-  --model runs/ppo-navigation/latest.zip --episodes 10
+pip install -e '.[collect]'
+valorant-lab record --episodes 5 --split train
+valorant-lab record --episodes 2 --split validation
 ```
 
-`--steps` 是本次追加的采样步数，PPO 会按完整 rollout 向上取整。`--envs 2` 可创建独立引擎进程；先单环境验收再增加并发。断点保存策略与优化器，不保存当时的场景状态，继续时重新开始回合。
+窗口内按 Space 开始；WASD 移动、鼠标瞄准、左键开火、R 换弹、Shift 静步、Ctrl 蹲、Space 跳跃。回合成功后按 S 确认保存，R 重试；Esc 放弃当前示范。失败、失焦或未完成的记录不会自动成为正确示范。
 
-## 项目结构
+把整个 `runs/demonstrations/` 复制到云服务器相同目录，然后：
 
-| 路径 | 用途 |
-| --- | --- |
-| `configs/lotus_navigation.json` | 导航自检配置：地图、起点、终点和动作频率 |
-| `engine/overlay/` | Godot C# 训练入口和本机通信桥 |
-| `src/valorant_lab/` | Gymnasium 环境、PPO 与命令行 |
-| `scripts/` | 固定版本下载、构建和地图迁移 |
-| `dependencies.lock.json` | 上游源代码、Godot、.NET 版本及校验值 |
-| `requirements*.txt` | Python 基础依赖及训练依赖版本 |
-| `docs/` | 服务器、资源和接口说明 |
+```bash
+valorant-lab bc-train --data runs/demonstrations --device cuda
+bash scripts/run_linux.sh evaluate --model runs/bc/best.zip \
+  --queue runs/corrections --output runs/bc-evaluation
+valorant-lab queue --queue runs/corrections
+```
 
-`assets/` 仅跟踪地图 ZIP、SHA-256 文件和资源说明；解包后的地图保存在 `assets/maps-data/`，不提交 Git。`external/`、`.tools/`、`local.json` 和 `runs/` 也只保存在本机。每次训练记录配置及主要库版本。Python 平台相关间接依赖由 pip 解析，若要严格复现实验，还应保存本次 `pip freeze`、驱动和硬件信息。
+示范数量仅是命令示例，不是达到能力目标所需的数据量承诺。首批先确认采集和学习有效，再扩大规模。CPU 训练将 `--device cuda` 改为 `--device cpu`。
+
+## 强化学习与实时评估
+
+```bash
+bash scripts/run_linux.sh train --device cuda --init-bc runs/bc/best.zip
+bash scripts/run_linux.sh train --device cuda \
+  --resume runs/ppo-movement-combat/latest.zip --steps 100000
+bash scripts/run_linux.sh evaluate --model runs/ppo-movement-combat/latest.zip \
+  --split test --realtime --output runs/realtime-test
+```
+
+PPO 默认每 25,000 步做 3 个开发回合评估，并把代表性失败放入本次训练目录的 `corrections/`；评估会暂时占用训练时间和一个额外渲染进程。可用 `--eval-every` 调整，设为 0 关闭。正式测试集不生成纠错题。
+
+`--steps` 为追加采样步数，PPO 会按完整 rollout 向上取整。保存模型旁边的同名 `.json`，其中包含动作语义、观察、任务和来源信息；迁移服务器时需要与 `.zip` 一起复制。低离线损失不等于游戏通过，步进模式成功也不等于实时通过。
+
+## 后续计划与研究
+
+| 阶段 | 目标 | 状态 |
+| --- | --- | --- |
+| 1A 基础移动交战 | 走路线、观察、停稳射击、换弹、恢复行进 | 环境、采集、训练与评估工具已接入；真人数据及模型能力验收待进行 |
+| 1B 跟队与守点 | 可见队友跟随、跟丢恢复、固定岗位守点 | 待实现 |
+| 1C 基础爆破回合 | 携包、安装、守包、回防、拆除、简化多人回合 | 待实现 |
+
+浏览器串流、任意时刻场景快照、声音输入、图像目标导航、长期记忆、技能和外接键鼠均未实现。完整官方客户端机制校准、模型量化和低配部署优化继续按后续阶段推进。
+
+- [第一阶段使用手册](docs/stage1-guide.md)：课程、录制、重放、BC/PPO、纠错、原速验收。
+- [目标、状态与路线图](docs/research/project-status-and-roadmap.md)：工作包、能力门槛与后续安排。
+- [人工纠错与训练路线](docs/research/human-correction-plan.md)：DAgger/DART、规则协作、云端分工、选型理由。
+- [CS:GO 与具身智能参考](docs/research/reference-projects.md)、[系统设计](docs/research/system-design.md)、[数据与评估规范](docs/research/data-training-evaluation.md)、[决策记录](docs/research/decisions.md)。
+- [教学手册](docs/research/beginner-guide.md)、[来源及评论台账](docs/research/teaching-source-ledger.md)、[训练任务卡](docs/research/training-task-cards.md)。
 
 ## 开发与验证
 
@@ -112,10 +118,6 @@ python scripts/bootstrap.py
 bash scripts/run_linux.sh smoke
 ```
 
-`ci/checks.yml` 提供 Python 协议测试和 C# 编译的 GitHub Actions 模板，当前未启用。具备 workflow 写入权限后可将它放入 `.github/workflows/`。模板未执行地图解包和渲染，因此 CI 通过也不代表真实地图渲染验收。实际运行记录见 [验证说明](docs/validation.md)。观察和动作定义见 [环境接口](docs/environment.md)。
+地图机制的完整集成检查使用 `scripts/validate_stage1.py`，见[验证记录](docs/validation.md)。其中的测试控制器读取坐标来检查环境，数据明确标为 `script_test`，普通 BC 命令会拒绝将它冒充真人示范。
 
-修改 overlay 后重跑 `bootstrap.py`；它只更新 `external/` 内生成的副本，保留原始下载和已安装的训练器。更换上游版本需要一起更新哈希、补丁锚点和实际地图检查。
-
-## 来源与许可
-
-代码按 GPL-3.0-or-later 提供，参见 [LICENSE](LICENSE) 和 [NOTICE](NOTICE)。本项目修改并连接 CA-VAL-AIM v2.11.0，保留其对 ValTrainer 的归属。地图资源不在代码许可证范围内；VALORANT 及相关商标、素材属于其权利人。本项目与 Riot Games 无隶属或背书关系。
+源码在 `engine/overlay/` 与 `src/valorant_lab/`；上游版本由 `dependencies.lock.json` 固定。`external/`、`.tools/`、本机配置、示范、日志和权重不提交 Git。GitHub Actions 模板在 `ci/checks.yml`，尚未启用；功能验证结果以实际记录为准。

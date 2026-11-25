@@ -10,6 +10,7 @@ import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 from .protocol import RpcClient
+from .scenario import load_scenario, action_sizes, noop
 
 ROOT = Path(__file__).resolve().parents[2]
 ACTION_SIZES = np.array([3, 3, 3, 5, 3, 2, 2, 2], dtype=np.int64)
@@ -42,15 +43,18 @@ class ValorantNavigationEnv(gym.Env):
 
     def __init__(self, scenario: str | Path | None = None, *, root: str | Path = ROOT,
                  render_mode: str | None = None, port: int | None = None,
-                 startup_timeout: float = 180, timeout: float = 60):
+                 startup_timeout: float = 180, timeout: float = 60, realtime: bool = False):
         super().__init__()
         if render_mode not in (None, "rgb_array"):
             raise ValueError("Only rgb_array is supported; the engine window is controlled by its renderer")
         self.root = Path(root).resolve()
         self.scenario_path = Path(scenario).resolve() if scenario else self.root / "configs/lotus_navigation.json"
-        self.config = json.loads(self.scenario_path.read_text())
+        self.config = load_scenario(self.scenario_path)
+        self.realtime = realtime
+        self.last_engine_seed = None
         self.render_mode = render_mode
-        self.action_space = spaces.MultiDiscrete(ACTION_SIZES)
+        self.action_space = spaces.MultiDiscrete(action_sizes(self.config))
+        self.noop = noop(self.config)
         self.observation_space = spaces.Box(0, 255,
             (self.config["height"], self.config["width"], 3), dtype=np.uint8)
         self.metadata = {**type(self).metadata,
@@ -93,6 +97,8 @@ class ValorantNavigationEnv(gym.Env):
             "--agent-config", str(self.scenario_path), "--agent-port", "0", "--agent-ready", str(ready)]
         if local.get("maps_dir"):
             command.extend(["--maps-dir", local["maps_dir"]])
+        if self.realtime:
+            command.append("--agent-realtime")
         # A rendering display is required. Server entry scripts provide Xvfb when DISPLAY is absent.
         self.process = subprocess.Popen(command, env=env, cwd=self.root,
             stdout=self.log, stderr=subprocess.STDOUT)
@@ -106,6 +112,10 @@ class ValorantNavigationEnv(gym.Env):
                     data = json.loads(ready.read_text())
                     if data["protocol"] != 1 or data["scenario"] != self.config["id"]:
                         raise RuntimeError("Engine protocol/scenario mismatch")
+                    if data.get("revision", 0) < 2 or data.get("action_sizes") != self.action_space.nvec.tolist():
+                        raise RuntimeError("Engine overlay is outdated; rerun scripts/bootstrap.py")
+                    if data.get("clock") != ("realtime" if self.realtime else "lockstep"):
+                        raise RuntimeError("Engine clock mismatch")
                     return int(data["port"])
                 except json.JSONDecodeError:
                     pass  # Atomic readiness is not assumed while file is being written.
@@ -126,12 +136,17 @@ class ValorantNavigationEnv(gym.Env):
 
     def reset(self, *, seed=None, options=None):
         super().reset(seed=seed)
-        if options:
-            raise ValueError("Scenario is fixed per environment; create another env to change it")
+        options = options or {}
+        if set(options) - {"engine_seed"}:
+            raise ValueError("Only engine_seed reset option is supported")
         if self.client is None:
             raise RuntimeError("Environment is closed")
         self.needs_reset = True
-        engine_seed = int(self.np_random.integers(0, 2**31 - 1))
+        # PPO samples only the training seed bank. Evaluation banks are selected explicitly.
+        engine_seed = options.get("engine_seed", int(self.np_random.integers(0, 100000)))
+        if type(engine_seed) is not int or not 0 <= engine_seed < 2**31:
+            raise ValueError("engine_seed must be an integer in [0, 2**31)")
+        self.last_engine_seed = engine_seed
         response = self.client.call("reset", seed=engine_seed)
         observation = self._observation(response)
         self.needs_reset = False
@@ -141,7 +156,7 @@ class ValorantNavigationEnv(gym.Env):
         if self.needs_reset:
             raise RuntimeError("Call reset before step / after episode end")
         array = np.asarray(action)
-        if array.shape != ACTION_SIZES.shape or array.dtype.kind not in "iu" or not self.action_space.contains(array):
+        if array.shape != (8,) or array.dtype.kind not in "iu" or not self.action_space.contains(array):
             raise ValueError("Action must be eight integers in the documented MultiDiscrete ranges")
         try:
             response = self.client.call("step", action=array.tolist())
@@ -183,3 +198,7 @@ class ValorantNavigationEnv(gym.Env):
             self.log.close()
             self.log = None
         self.needs_reset = True
+
+
+# The original name is kept for existing scripts; the class now supports both task modes.
+ValorantEnv = ValorantNavigationEnv

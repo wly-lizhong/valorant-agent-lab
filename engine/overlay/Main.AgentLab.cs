@@ -34,13 +34,15 @@ public partial class Main
             GetTree().Root.Size = new Vector2I(config.RenderWidth, config.RenderHeight);
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
             Engine.MaxFps = 120;
-            var session = new GameSession(() => new NavigationMode(config)) { AgentControlled = true, WarmupSession = true };
+            var session = new GameSession(() => config.Mode == "move_combat"
+                ? new MovementCombatMode(config) : new NavigationMode(config))
+                { AgentControlled = true, WarmupSession = true };
             screen = session;
             inGame = true;
             AddChild(session);
-            session.AgentReset(config, 0);
             var bridge = new AgentBridge(session, config, int.Parse(CmdLine.After("--agent-port") ?? "0"),
-                CmdLine.After("--agent-ready") ?? throw new ArgumentException("Missing --agent-ready"));
+                CmdLine.After("--agent-ready") ?? throw new ArgumentException("Missing --agent-ready"),
+                CmdLine.Has("--agent-realtime"));
             AddChild(bridge);
             GD.Print("[agent-lab] ready; loopback RPC, rendered RGB observations");
         }
