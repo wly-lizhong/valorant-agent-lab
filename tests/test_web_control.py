@@ -1,5 +1,7 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
+import threading
 import time
 import numpy as np
 import pytest
@@ -7,7 +9,7 @@ import pytest
 pytest.importorskip("aiohttp")
 from aiohttp import CookieJar, WSServerHandshakeError
 from aiohttp.test_utils import TestClient, TestServer
-from valorant_lab.web_control import Settings, HumanSession, Catalog, create_app, token_file
+from valorant_lab.web_control import Settings, HumanSession, Catalog, create_app, token_file, shutdown_controller
 from valorant_lab.scenario import load_scenario, noop
 from valorant_lab.dataset import load_episodes
 from valorant_lab.corrections import enqueue_failure, load_case
@@ -222,3 +224,34 @@ def test_web_control_timeout_closes_own_engine(settings):
             await ws.receive()
             assert FakeEnv.instances[-1].closed and FakeEnv.instances[-1].actions == []
     asyncio.run(check())
+
+
+def test_cancelled_request_still_finalizes_episode_and_closes_engine(settings):
+    session, _ = begin(settings)
+    engine = session.env
+    release = threading.Event()
+    entered = threading.Event()
+    executor = ThreadPoolExecutor(max_workers=1)
+    def busy():
+        entered.set()
+        release.wait(3)
+    executor.submit(busy)
+    assert entered.wait(1)
+    async def check():
+        task = asyncio.create_task(shutdown_controller(session, executor))
+        await asyncio.sleep(0)
+        task.cancel()
+        # Give cancellation a turn while cleanup is still queued behind the worker.
+        await asyncio.sleep(0)
+        release.set()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+    try:
+        asyncio.run(check())
+    finally:
+        release.set()
+        executor.shutdown(wait=True)
+    assert engine.closed
+    metadata = json.loads(next(settings.output.glob("*/episode.json")).read_text())
+    assert not metadata["accepted"] and not metadata["complete"]
+    assert "connection_closed" in metadata["quality_issues"]

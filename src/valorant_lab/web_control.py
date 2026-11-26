@@ -249,6 +249,22 @@ def token_file(path):
     return token
 
 
+async def shutdown_controller(controller, executor):
+    # Peer disconnect can cancel the request while abort is still queued. Shield
+    # the submitted job so both the dataset and engine are closed before releasing
+    # the control lease. Keeping only executor.shutdown() does not prevent a queued
+    # cleanup future from being cancelled before its worker starts.
+    cleanup = asyncio.get_running_loop().run_in_executor(
+        executor, partial(controller.abort, "connection_closed"))
+    try:
+        await asyncio.shield(cleanup)
+    except asyncio.CancelledError:
+        await asyncio.shield(cleanup)
+        raise
+    finally:
+        executor.shutdown(wait=True)
+
+
 def create_app(settings, *, token, origins, env_factory=ValorantEnv):
     from aiohttp import web, WSMsgType
     origins = frozenset(origins)
@@ -351,9 +367,8 @@ def create_app(settings, *, token, origins, env_factory=ValorantEnv):
                 await ws.send_json({"type": "error", "message": str(exc)[:600]})
         finally:
             try:
-                await work(controller.abort, "connection_closed")
+                await shutdown_controller(controller, executor)
             finally:
-                executor.shutdown(wait=True)
                 holder["ws"] = None
                 await ws.close()
         return ws
