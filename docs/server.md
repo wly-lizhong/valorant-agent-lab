@@ -2,6 +2,8 @@
 
 目标平台：Ubuntu 22.04/24.04 x86_64，系统 Python 3.10/3.12。脚本安装系统运行库，在项目内建立 Python 虚拟环境，并下载校验固定的 Godot 4.7.2 .NET 和 .NET SDK 8.0.428。首次需要网络，建议预留至少 10 GB 磁盘；GPU 库、训练日志和模型会继续占用空间。
 
+2026-11-26 默认分工已修正：当前本地电脑低配、无 GPU，只承担开发和远程操作。游戏渲染、示范采集、训练与评估放在无桌面云端。NVIDIA 与 sudo 已确认，具体 GPU 和实例类型待核验。见[云端工作流](cloud-workflow.md)；下面安装命令不代表已自动配好 NVIDIA 图形服务或浏览器入口。
+
 ## Ubuntu
 
 ```bash
@@ -19,7 +21,7 @@ bash scripts/run_linux.sh doctor
 bash scripts/run_linux.sh smoke
 ```
 
-无 GPU 的工作电脑可先使用 CPU 构建：
+仅在需要 CPU 工具自检、且愿意承担相应资源开销时使用以下构建；它不是当前低配电脑的默认工作流程：
 
 ```bash
 pip install torch==2.8.0 --index-url https://download.pytorch.org/whl/cpu
@@ -33,7 +35,7 @@ bash scripts/run_linux.sh train --device cpu --steps 256
 
 Godot 的 `--headless` 使用无画面的渲染器，不能生成训练需要的图像。本项目只在导入资源时使用它，运行阶段明确拒绝它。
 
-`run_linux.sh` 在没有 `DISPLAY` 时使用 Xvfb + Mesa 软件渲染。这样无桌面服务器也能验收、训练；模型仍可以由 CUDA 加速，但地图渲染占 CPU。需要更高吞吐时，为 NVIDIA 配置能实际创建 OpenGL 上下文的显示服务，再设置 `DISPLAY`，检查 `runs/engine-*/engine.log` 中的渲染设备。当前未自动配置 GPU 显示服务。
+`run_linux.sh` 在没有 `DISPLAY` 时使用 Xvfb + Mesa 软件渲染，并设置 `LIBGL_ALWAYS_SOFTWARE=1`。这条回退路径用于功能检查，模型即使由 CUDA 加速，地图仍占 CPU。正式云端采样与真人操作之前，要配置能实际创建 GPU OpenGL 上下文的后台显示服务，再设置 `DISPLAY`，检查 `runs/engine-*/engine.log` 中的实际渲染设备和吞吐。无需完整桌面图标环境，但当前脚本未自动配置 GPU 显示服务。仅有 `DISPLAY` 或 `nvidia-smi` 成功均不足以判定通过。
 
 WSLg 自带显示时可以直接运行。要测试无桌面路径：
 
@@ -43,7 +45,7 @@ DISPLAY= bash scripts/run_linux.sh smoke
 
 ## 正式训练、恢复和日志
 
-推荐先在有显示器的机器录制，复制数据到云端运行 `bc-train`，再初始化 PPO；具体流程见[第一阶段手册](stage1-guide.md)。离线 BC 无需运行 Godot，也无需 `DISPLAY`。下面的 PPO 默认是新的移动交战任务，短训只检查工具链，不代表能力达标。
+默认先补齐云端浏览器人工入口，在云端采集示范并运行 `bc-train`，再初始化 PPO；具体顺序见[云端工作流](cloud-workflow.md)。现有本地录制器可复用，但浏览器控制与网络数据对齐还需实现。离线 BC 无需运行 Godot，也无需 `DISPLAY`。下面的 PPO 命令应在云端渲染验收后使用，默认是新的移动交战任务；短训只检查工具链，不代表能力达标。
 
 ```bash
 bash scripts/run_linux.sh train --device cuda --steps 100000 \
@@ -75,6 +77,8 @@ bash scripts/run_linux.sh smoke
 保留 `local.json`、地图和 `runs/`。保存当前 Git SHA 以及 `pip freeze`，便于回到对应代码。不要在训练进程运行时切换代码。
 
 ## Windows 调试
+
+这一节是其他具备图形条件的 Windows 机器的可选路径。当前无 GPU 的开发电脑不需要完成以下游戏运行和录制步骤；可只安装轻量依赖、运行 Python 单元检查，通过 SSH/浏览器使用云端。
 
 需要 Python 3.10–3.12、[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 和可用的桌面显卡驱动。PowerShell 在仓库根目录运行：
 
