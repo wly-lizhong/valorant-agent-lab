@@ -63,7 +63,7 @@ bash scripts/run_cloud.sh smoke
 
 **平台默认 root 登录：** 无 `DISPLAY` 时直接 `bash scripts/run_cloud.sh smoke` 或 `bash scripts/run_cloud.sh web`，启动器自动选择空闲显示号 90–119，为这条命令创建 GPU Xorg；命令退出后关闭自己的显示进程。普通账号无显示时会提示先用 sudo 显示命令。`VALORANT_LAB_GPU=1` 可选择另一张卡；复用显示时以该显示的 GPU 为准。
 
-配置使用 `AllowEmptyInitialConfiguration` 与 `UseDisplayDevice=none`，不依赖显示器 EDID，不修改 `/etc/X11`，不接管已有桌面。实例仍可能因驱动、设备或虚拟终端权限拒绝启动；检查 `runs/gpu-display-*/Xorg.log` 和 `launcher.log`。[NVIDIA 配置依据](https://download.nvidia.com/XFree86/Linux-x86_64/580.105.08/README/xconfigoptions.html)
+配置使用 `AllowEmptyInitialConfiguration`，不修改 `/etc/X11`，不接管已有桌面。数据中心 GPU 的虚拟显示模式不支持旧的 `UseDisplayDevice=none`，因此不强制该选项。检查同时使用 OpenGL vendor 和 renderer，允许 V100 的 renderer 仅显示 `Tesla V100...`，仍拒绝软件渲染。实例仍可能因驱动、设备或虚拟终端权限拒绝启动；检查 `runs/gpu-display-*/Xorg.log` 和 `launcher.log`。[NVIDIA 数据中心说明](https://docs.nvidia.com/datacenter/tesla/tesla-release-notes-535-54-03/index.html)
 
 启动器先检查 `glxinfo -B`，再要求游戏 `ready.json` 中的 `render_vendor` / `render_device` 报告 NVIDIA，缺少字段会要求重建引擎。字段来自 [Godot RenderingServer](https://docs.godotengine.org/en/stable/classes/class_renderingserver.html)。有效画面和吞吐还需 smoke/试玩验证。
 

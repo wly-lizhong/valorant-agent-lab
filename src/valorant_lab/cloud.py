@@ -29,8 +29,11 @@ def probe(command, *, env=None, timeout=12):
 
 
 def nvidia_renderer(text):
-    lines = [line for line in text.splitlines() if "OpenGL renderer string:" in line]
-    return bool(lines and "nvidia" in lines[0].lower()
+    fields = dict(line.strip().split(":", 1) for line in text.splitlines()
+                  if line.strip().startswith(("OpenGL vendor string:", "OpenGL renderer string:")))
+    # Tesla drivers identify the vendor separately; their renderer can omit NVIDIA.
+    return bool(fields.get("OpenGL vendor string", "").strip().lower() == "nvidia corporation"
+                and fields.get("OpenGL renderer string", "").strip()
                 and not any(word in text.lower() for word in SOFTWARE))
 
 
@@ -73,7 +76,6 @@ Section "Device"
     Driver "nvidia"
     BusID "__BUS__"
     Option "AllowEmptyInitialConfiguration" "true"
-    Option "UseDisplayDevice" "none"
     Option "ProbeAllGpus" "false"
 EndSection
 Section "Screen"

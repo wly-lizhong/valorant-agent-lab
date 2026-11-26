@@ -9,7 +9,12 @@ from valorant_lab import cloud
 
 
 @pytest.mark.parametrize("text,ok", [
-    ("OpenGL renderer string: NVIDIA RTX 4090/PCIe/SSE2", True),
+    ("OpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: NVIDIA RTX 4090/PCIe/SSE2", True),
+    ("OpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: Tesla V100-SXM2-16GB/PCIe/SSE2", True),
+    ("OpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: llvmpipe", False),
+    ("OpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: ", False),
+    ("OpenGL renderer string: NVIDIA RTX 4090", False),
+    ("OpenGL vendor string: Mesa\nOpenGL renderer string: NVIDIA RTX 4090", False),
     ("OpenGL renderer string: llvmpipe (LLVM 19)\nNVIDIA driver installed", False),
     ("NVIDIA-SMI 580.105.08", False),
     ("OpenGL renderer string: Intel UHD", False)])
@@ -18,7 +23,7 @@ def test_cuda_inventory_is_not_graphics_proof(text, ok):
 
 
 def test_graphics_requires_display_and_does_not_hide_software_override(monkeypatch):
-    monkeypatch.setattr(cloud, "probe", lambda *a, **kw: {"ok": True, "output": "OpenGL renderer string: NVIDIA Test"})
+    monkeypatch.setattr(cloud, "probe", lambda *a, **kw: {"ok": True, "output": "OpenGL vendor string: NVIDIA Corporation\nOpenGL renderer string: NVIDIA Test"})
     assert not cloud.graphics_check({})["ok"]
     assert cloud.graphics_check({"DISPLAY": ":99"})["ok"]
     assert not cloud.graphics_check({"DISPLAY": ":99", "LIBGL_ALWAYS_SOFTWARE": "1"})["ok"]
@@ -27,7 +32,9 @@ def test_graphics_requires_display_and_does_not_hide_software_override(monkeypat
 def test_pci_decimal_conversion_and_config_injection():
     assert cloud.pci_bus_id("00000000:AF:01.0") == "PCI:175:1:0"
     assert cloud.pci_bus_id("0001:0A:00.0") == "PCI:10@1:0:0"
-    assert 'UseDisplayDevice" "none' in cloud.xorg_config("PCI:175:1:0")
+    # V100 virtual displays reject the obsolete NoScanout option.
+    assert 'UseDisplayDevice' not in cloud.xorg_config("PCI:175:1:0")
+    assert 'AllowEmptyInitialConfiguration' in cloud.xorg_config("PCI:175:1:0")
     with pytest.raises(ValueError):
         cloud.pci_bus_id("0; command")
     with pytest.raises(ValueError):
