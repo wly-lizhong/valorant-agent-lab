@@ -2,7 +2,7 @@
 
 目标平台：Ubuntu 22.04/24.04 x86_64，系统 Python 3.10/3.12。脚本安装系统运行库，在项目内建立 Python 虚拟环境，并下载校验固定的 Godot 4.7.2 .NET 和 .NET SDK 8.0.428。首次需要网络，建议预留至少 10 GB 磁盘；GPU 库、训练日志和模型会继续占用空间。
 
-2026-11-26：本地低配、无 GPU，只承担开发和浏览器操作。游戏渲染、示范采集、训练与评估放在无桌面云端。NVIDIA 与 sudo 已确认，具体实例待核验。新增 `setup_cloud.sh`、`run_cloud.sh` 和 `web` 入口，按[云端工作流](cloud-workflow.md)安装、启动 GPU 显示和浏览器服务。
+2026-11-26：本地低配、无 GPU，只承担开发和浏览器操作。游戏渲染、示范采集、训练与评估放在无桌面云端。矩池云、NVIDIA 与 sudo 已确认，具体实例待核验。新增 `setup_cloud.sh`、`run_cloud.sh` 和 `web` 入口，先按[矩池云指南](matpool.md)确认持久化与图形能力，再按[云端工作流](cloud-workflow.md)启动 GPU 显示和浏览器服务。
 
 ## Ubuntu
 

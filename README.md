@@ -39,6 +39,8 @@
 
 目标为 Ubuntu 22.04/24.04 x86_64 + NVIDIA。仓库包含约 74 MB 的 Lotus 地图包，无需 Git LFS；地图归属见[资源说明](assets/NOTICE.md)。
 
+当前训练平台已确定为矩池云，先按[矩池云首次启动与验收](docs/matpool.md)确认镜像、网盘挂载和 GPU 图形能力。标准 Linux 镜像通常运行在容器中；能使用 CUDA 尚不能证明能渲染游戏，具体实例仍待实机检查。
+
 ```bash
 git clone https://github.com/wly-lizhong/valorant-agent-lab.git
 cd valorant-agent-lab
@@ -118,6 +120,7 @@ PPO 默认每 25,000 步做 3 个开发回合评估，并把代表性失败放�
 
 - [第一阶段使用手册](docs/stage1-guide.md)：课程、录制、重放、BC/PPO、纠错、原速验收。
 - [云端工作流](docs/cloud-workflow.md)：低配开发端、无桌面 Linux、GPU 渲染与远程人工入口的分工及缺口。
+- [矩池云操作指南](docs/matpool.md)：持久化目录、实例图形验收、带平台端口的 SSH 隧道和换机恢复。
 - [目标、状态与路线图](docs/research/project-status-and-roadmap.md)：工作包、能力门槛与后续安排。
 - [人工纠错与训练路线](docs/research/human-correction-plan.md)：DAgger/DART、规则协作、云端分工、选型理由。
 - [CS:GO 与具身智能参考](docs/research/reference-projects.md)、[系统设计](docs/research/system-design.md)、[数据与评估规范](docs/research/data-training-evaluation.md)、[决策记录](docs/research/decisions.md)。
