@@ -3,8 +3,58 @@ const el = id => document.getElementById(id);
 const canvas = el("game"), ctx = canvas.getContext("2d", {alpha: false});
 let socket, tasks = [], state = "idle", timer, generation = 0;
 let keys = new Set(), fire = false, reload = false, dx = 0, dy = 0;
+let guided = true;
+function drawGuide(guide) {
+  el("route-guide").hidden = !guided;
+  el("guide-hud").hidden = !guided || !guide;
+  if (!guided) return;
+  const map = el("route-map"), c = map.getContext("2d");
+  c.clearRect(0, 0, map.width, map.height);
+  if (!guide) {
+    el("route-instruction").textContent = "暂时没有定位信息，请重新加载场景";
+    el("route-progress").textContent = el("route-distance").textContent = "";
+    el("route-progress-bar").value = 0;
+    return;
+  }
+  el("route-instruction").textContent = guide.instruction;
+  el("route-progress").textContent = `路线点：已完成 ${guide.completed} / ${guide.total}`;
+  el("route-progress-bar").max = guide.total;
+  el("route-progress-bar").value = guide.completed;
+  el("route-distance").textContent = guide.success ? "已到终点，可以结束练习或重新加载后正式录制。" : `下一点：${Math.min(guide.completed + 1, guide.total)} 号${guide.completed >= guide.total - 1 ? "（终点）" : ""} · 距离 ${guide.distance.toFixed(1)} 米 · 判定半径 ${guide.radius.toFixed(1)} 米`;
+  const arrow = Math.abs(guide.angle) > 150 ? "↶" : guide.angle > 15 ? "→" : guide.angle < -15 ? "←" : "↑";
+  el("guide-hud").textContent = guide.success ? "✓ 已到终点" : `${arrow} ${guide.instruction} · ${guide.distance.toFixed(1)} 米`;
+  const points = [...guide.route, guide.position];
+  const xs = points.map(p => p[0]), zs = points.map(p => p[2]);
+  const minX = Math.min(...xs) - 2, maxX = Math.max(...xs) + 2;
+  const minZ = Math.min(...zs) - 2, maxZ = Math.max(...zs) + 2;
+  const scale = Math.min(220 / (maxX - minX), 160 / (maxZ - minZ));
+  const project = p => [130 + (p[0] - (minX + maxX) / 2) * scale, 100 + (p[2] - (minZ + maxZ) / 2) * scale];
+  const route = guide.route.map(project);
+  c.strokeStyle = "#6d879e"; c.lineWidth = 3; c.beginPath();
+  route.forEach(([x,y], i) => i ? c.lineTo(x,y) : c.moveTo(x,y)); c.stroke();
+  c.font = "bold 13px sans-serif";
+  route.forEach(([x,y], i) => {
+    c.fillStyle = i === guide.completed + 1 ? "#ffcf60" : i <= guide.completed ? "#6be3b8" : "#8da7bd";
+    c.beginPath(); c.arc(x,y,5,0,Math.PI*2); c.fill();
+    c.fillText(i === 0 ? "起点" : `${i}${i === guide.total ? " 终点" : ""}`, x+9,y+4);
+  });
+  const [gx,gy] = route[route.length-1]; c.strokeStyle="#6be3b8"; c.lineWidth=2;
+  c.beginPath(); c.arc(gx,gy,Math.max(8,guide.radius*scale),0,Math.PI*2); c.stroke();
+  const [px,py] = project(guide.position); c.save(); c.translate(px,py); c.rotate(guide.yaw*Math.PI/180);
+  c.fillStyle="#fff"; c.strokeStyle="#101820"; c.lineWidth=2;
+  c.beginPath(); c.moveTo(0,-10); c.lineTo(7,8); c.lineTo(0,4); c.lineTo(-7,8); c.closePath(); c.fill(); c.stroke(); c.restore();
+}
 const allowedKeys = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ShiftLeft", "ControlLeft", "Space"]);
 function status(text) { el("status").textContent = text; }
+function showOutcome(message, stopped = false) {
+  const outcome = message.outcome || {}, success = outcome.success === true;
+  el("result-banner").hidden = false;
+  el("result-title").textContent = stopped ? "本次已停止 · 未提交示范" : success ? "✓ 任务完成" : "本次结束 · 任务未完成";
+  const reason = {timeout:"本次练习时间已用完。", death:"角色已死亡。", fall:"角色跌落，任务结束。"}[outcome.reason] || "";
+  const progress = outcome.total ? `路线点已通过 ${outcome.completed} / ${outcome.total}。` : "";
+  const missing = outcome.total && outcome.completed < outcome.total ? `需要依次经过全部路线点；下一个是 ${outcome.completed + 1} 号点，走到后面的区域不会自动补过漏点。` : "";
+  el("result-detail").textContent = reason + progress + (success ? stopped ? "本次未提交，可重新加载再试。" : guided ? "练习完成，可结束练习后切换正式示范。" : message.quality_ok ? "请点击下方按钮确认提交示范。" : "任务成功，但记录未通过质量检查，可保存供检查。" : missing || "请根据本课要求完成路线与交战，再重试。 ");
+}
 function error(text) { el("error").textContent = text; el("error").hidden = !text; }
 function send(message) {
   if (socket?.readyState !== WebSocket.OPEN) throw new Error("控制连接已断开，请重新加载场景。");
@@ -14,7 +64,8 @@ function clearInput() { keys.clear(); fire = reload = false; dx = dy = 0; clearT
 function release() { clearInput(); if (document.pointerLockElement === canvas) document.exitPointerLock(); }
 function controls() {
   const busy = !["idle", "saved"].includes(state);
-  for (const id of ["open", "task", "split", "seed", "mouse-scale", "refresh"]) el(id).disabled = busy;
+  for (const id of ["open", "task", "split", "seed", "mouse-scale", "refresh", "guide-mode"]) el(id).disabled = busy;
+  el("start").textContent = el("guide-mode").value === "practice" ? "开始带引导练习" : "开始操作并录制";
   if (el("task").value.startsWith("case:")) { el("split").disabled = true; el("seed").disabled = true; }
   el("start").disabled = state !== "ready";
   el("stop").disabled = !busy || state === "loading";
@@ -76,10 +127,10 @@ async function receive(message) {
   if (message.type === "loading") { status("服务器正在加载地图，请稍候……"); return; }
   if (message.type === "saved") {
     generation++; state = "saved"; release(); controls(); el("save").hidden = true;
-    status(message.accepted ? `示范已提交：${message.episode}。等待下一次训练使用。` : "记录已保存供检查，未通过质量要求，不会进入训练。");
+    status(message.guided ? "练习已结束，没有写入训练数据。可选择正式示范并重新加载场景。" : message.accepted ? `示范已提交：${message.episode}。等待下一次训练使用。` : "记录已保存供检查，未通过质量要求，不会进入训练。");
     await catalog(); return;
   }
-  if (message.type === "stopped") { state = "idle"; controls(); return; }
+  if (message.type === "stopped") { state = "idle"; controls(); showOutcome(message, true); return; }
   if (message.type !== "frame" || state === "stopping") return;
   const version = generation;
   const bytes = Uint8Array.from(atob(message.png), c => c.charCodeAt(0));
@@ -91,19 +142,27 @@ async function receive(message) {
   await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   if (version !== generation) return;
   state = message.state; controls(); el("steps").textContent = message.step;
+  guided = message.guided === true; drawGuide(message.guidance);
   el("age").textContent = message.frame_age_ms === undefined ? "—" : `${message.frame_age_ms.toFixed(0)} ms`;
   el("engine").textContent = message.engine_step_ms === undefined ? "—" : `${message.engine_step_ms.toFixed(0)} ms`;
-  el("quality").textContent = message.quality_ok ? "画面与操作正常对应。完成后请确认提交。" : "本段出现明显延迟，已排除训练；完成后可保存供检查。";
-  if (state === "ready") { status("场景已就绪。点击“开始操作并录制”，鼠标将锁定到游戏画面。"); return; }
+  el("quality").textContent = guided ? "当前为带引导练习，不录制训练数据。" : !message.quality_ok ? "操作采样出现异常停顿，已排除训练；完成后可保存供检查。" : message.latency_warning ? "画面往返较慢，游戏会减速；当前画面与动作仍对应，未因此排除训练。" : "画面与操作正常对应。完成后请确认提交。";
+  if (state === "ready") { status(`场景已就绪。点击“${el("start").textContent}”，鼠标将锁定到游戏画面。`); return; }
   if (state === "review") {
     release(); el("save").hidden = false;
+    showOutcome(message);
+    el("result-banner").scrollIntoView({block:"nearest"});
+    if (guided) {
+      el("save").textContent = "结束练习";
+      status(message.success ? "练习完成！结束练习后，可切换正式示范并重新加载。" : "练习结束，尚未完成目标。结束后重新加载再试。");
+      return;
+    }
     el("save").textContent = message.success && message.quality_ok ? "确认提交成功示范" : "保存本次记录（不进入训练）";
     status(message.success ? "目标完成。确认这次操作是你希望智能体学习的示范后，再提交。" : "本次未完成目标。可以保存检查，或放弃后重新练习。");
     return;
   }
   if (state !== "active") return;
   if (document.pointerLockElement !== canvas || document.hidden || !document.hasFocus()) { stop(); return; }
-  status("正在录制 · 完成任务后自动结束；Esc 退出会放弃本段。");
+  status(guided ? "正在练习 · 跟随上方黄色路线点；Esc 退出。本次不会录入训练。" : "正在录制 · 完成任务后自动结束；Esc 退出会放弃本段。");
   // Drop motion collected while the previous image was still visible. Held keys remain held.
   dx = dy = 0;
   const displayed = performance.now();
@@ -125,12 +184,15 @@ el("login-form").addEventListener("submit", async event => {
 });
 el("refresh").addEventListener("click", () => catalog().catch(e => error(e.message)));
 el("task").addEventListener("change", describe);
+el("guide-mode").addEventListener("change", () => { el("route-guide").hidden = el("guide-hud").hidden = true; controls(); });
 el("open").addEventListener("click", async () => {
   error("");
   const seed = Number(el("seed").value), scale = Number(el("mouse-scale").value);
   if (!Number.isInteger(seed) || seed < 0 || seed >= 100000 || !Number.isFinite(scale) || scale < .001 || scale > 2) { error("请检查场景编号和鼠标灵敏度。"); return; }
   state = "loading"; generation++; controls(); el("save").hidden = true;
-  try { await connect(); send({type:"open", task:el("task").value, seed, split:el("split").value, mouse_scale:scale}); }
+  el("result-banner").hidden = true;
+  el("route-guide").hidden = el("guide-hud").hidden = true;
+  try { await connect(); send({type:"open", task:el("task").value, seed, split:el("split").value, mouse_scale:scale, guided:el("guide-mode").value === "practice"}); }
   catch (e) { fail(e); }
 });
 el("start").addEventListener("click", async () => {

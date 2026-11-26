@@ -23,13 +23,20 @@
         <label for="task">基础课程 / 系统纠错</label><select id="task"></select>
         <p id="task-description" class="description"></p>
         <p id="case-status" class="muted"></p>
+        <label for="guide-mode">操作模式</label><select id="guide-mode"><option value="practice">先熟悉路线 · 带引导练习</option><option value="record">正式示范 · 无额外导航</option></select>
+        <p class="muted">先看懂路线再录制。带引导练习不保存为训练数据；正式示范需重新加载场景。</p>
         <div class="field-pair"><div><label for="split">示范用途</label><select id="split"><option value="train">训练集</option><option value="validation">验证集</option></select></div><div><label for="seed">场景编号</label><input id="seed" type="number" min="0" max="99999" value="42" step="1"></div></div>
         <label for="mouse-scale">鼠标灵敏度</label><input id="mouse-scale" type="number" min="0.001" max="2" step="0.01" value="0.08">
         <button id="open" type="button" class="wide">加载场景</button>
         <div class="instructions"><h3>操作说明</h3><p><kbd>W A S D</kbd> 移动　<kbd>鼠标</kbd> 转视角</p><p><kbd>左键</kbd> 开枪　<kbd>R</kbd> 换弹</p><p><kbd>左 Shift</kbd> 慢走　<kbd>左 Ctrl</kbd> 蹲下</p><p><kbd>空格</kbd> 跳跃　<kbd>Esc</kbd> 退出本次</p><p class="muted">切换窗口或退出鼠标控制会停止本次录制。重新加载后可再试。</p></div>
       </aside>
       <section class="play-area">
-        <div class="viewport"><canvas id="game" width="256" height="144" tabindex="0" aria-label="服务器游戏画面"></canvas><div id="placeholder">选择任务后加载场景</div><span id="test-mode" hidden>模拟测试画面 · 不作为真人示范</span></div>
+        <section id="route-guide" class="panel route-guide" hidden aria-label="练习路线引导">
+          <div><p class="eyebrow">路线示意 · 仅练习可见</p><canvas id="route-map" width="260" height="200" aria-label="路线示意：白色箭头是你，黄色是下一点，青色圈是终点"></canvas><p class="map-legend">白箭头：你与朝向　黄点：下一点　青圈：终点</p></div>
+          <div class="route-copy"><h2 id="route-instruction">加载后显示方向</h2><p id="route-progress"></p><progress id="route-progress-bar" value="0" max="5" aria-label="路线完成进度"></progress><p id="route-distance"></p><p class="muted">依次靠近编号点，进入判定圈后自动切换下一点。连线只表示路线顺序，不代表能穿墙；遇到墙请沿通道绕行。此图未绘制墙体，不是完整小地图。</p></div>
+        </section>
+        <div class="viewport"><canvas id="game" width="256" height="144" tabindex="0" aria-label="服务器游戏画面"></canvas><div id="placeholder">选择任务后加载场景</div><span id="test-mode" hidden>模拟测试画面 · 不作为真人示范</span><div id="guide-hud" hidden></div></div>
+        <div id="result-banner" class="panel result-banner" role="status" aria-live="assertive" hidden><h2 id="result-title"></h2><p id="result-detail"></p></div>
         <div class="play-controls"><button id="start" type="button" disabled>开始操作并录制</button><button id="stop" type="button" class="secondary" disabled>停止并放弃</button><button id="save" type="button" hidden>确认提交成功示范</button></div>
         <div class="panel feedback"><p id="status" role="status" aria-live="polite">等待加载。</p><div class="stats"><span>步数 <b id="steps">—</b></span><span>画面往返与操作 <b id="age">—</b></span><span>引擎步进 <b id="engine">—</b></span></div><p id="quality" class="muted">成功完成并经你确认的合格示范，才会进入训练集。</p></div>
         <p class="footnote">当前为逐帧确认的操作模式。网络较慢时游戏会减速，画面尺寸与模型输入一致；原速游玩的流畅度另行评估。</p>

@@ -230,7 +230,10 @@ def main():
     browser.add_argument("--queue", default="runs/ppo-movement-combat/corrections")
     browser.add_argument("--state-dir", default="runs/web")
     browser.add_argument("--token-file", default="runs/web/access-token")
-    browser.add_argument("--max-frame-age-ms", type=float, default=250)
+    browser.add_argument("--max-frame-age-ms", type=float, default=250,
+                         help="Lockstep round-trip warning threshold; does not reject an episode")
+    browser.add_argument("--max-input-hold-ms", type=float, default=250,
+                         help="Maximum display-to-input sample time before excluding a demonstration")
     browser.add_argument("--control-timeout", type=float, default=3)
     browser.add_argument("--allow-software", action="store_true", help="CPU rendering diagnostics only, not cloud performance acceptance")
     browser.set_defaults(func=web_control)
@@ -250,7 +253,7 @@ def main():
         parser.error("--eval-every must be nonnegative")
     if hasattr(args, "seed") and not 0 <= args.seed < 100000:
         parser.error("--seed must be in [0, 100000)")
-    for name in ("learning_rate", "mouse_scale", "max_frame_age_ms", "control_timeout"):
+    for name in ("learning_rate", "mouse_scale", "max_frame_age_ms", "max_input_hold_ms", "control_timeout"):
         if hasattr(args, name) and (not np.isfinite(getattr(args, name)) or getattr(args, name) <= 0):
             parser.error(f"--{name.replace('_', '-')} must be positive and finite")
     if args.command == "web" and not 1 <= args.port <= 65535:

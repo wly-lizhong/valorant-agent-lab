@@ -70,11 +70,12 @@ def test_browser_labels_pre_action_pixels_and_requires_confirmation(settings):
     session, packet = begin(settings, split="validation", seed=42)
     env = session.env
     result = step(session, packet)
-    assert env.seed == 100042 and env.closed
+    assert env.seed == 100042 and not env.closed  # result is sent before teardown
     assert env.actions[0].tolist() == [1, 0, 2, 6, 6, 0, 1, 1]
     assert result["state"] == "review"
     assert load_episodes(settings.output, session.config) == []
     saved = session.save()
+    assert env.closed
     assert saved["accepted"]
     # Synthetic tests can never be silently treated as human training data.
     with pytest.raises(ValueError, match="Unusable"):
@@ -90,17 +91,63 @@ def test_browser_labels_pre_action_pixels_and_requires_confirmation(settings):
     session.abort()
 
 
+def test_guided_practice_never_records_or_resolves_corrections(settings):
+    config, _, _ = Catalog(settings).resolve("lotus_route")
+    path = enqueue_failure(settings.queue, config, 200042, [{"step": 40}],
+                           np.zeros((144, 256, 3), np.uint8), split="dev", model_hash="test")
+    session, packet = begin(settings, task="case:" + path.parent.name, guided=True)
+    assert packet["guided"] and session.writer is None
+    session.info.update(position=config["start"], yaw=10.6, waypoint=0)
+    packet = session.packet()
+    assert packet["guidance"]["total"] == 5
+    result = step(session, packet, age=.8)
+    assert result["state"] == "review" and session.writer is None
+    assert session.save() == {"type": "saved", "accepted": False, "guided": True}
+    assert load_case(path)["status"] == "pending"
+    assert not list(settings.output.glob("episode-*"))
+    session.abort()
+    packet = session.prepare({"task": "lotus_route", "guided": False})
+    assert packet["guidance"] is None and not packet["guided"]
+    session.start()
+    assert session.writer is not None
+    session.abort()
+
+
+def test_invalid_guidance_flag_rejected_before_engine_start(settings):
+    with pytest.raises(ValueError, match="guided"):
+        begin(settings, guided="false")
+    assert not FakeEnv.instances
+
+
 @pytest.mark.parametrize("reason", ["late", "unconfirmed", "disconnect"])
 def test_unusable_episodes_never_enter_training(settings, reason):
     session, packet = begin(settings)
     if reason != "disconnect":
-        step(session, packet, age=.8 if reason == "late" else .1)
+        step(session, packet, age=.8 if reason == "late" else .1,
+             sampled_ms=1800 if reason == "late" else 1050)
     if reason == "late":
         result = session.save()
-        assert not result["accepted"] and result["quality_issues"] == ["browser_frame_age_exceeded"]
+        assert not result["accepted"] and result["quality_issues"] == ["browser_input_hold_exceeded"]
     else:
         session.abort(reason)
     assert load_episodes(settings.output, session.config, allow_test_data=True) == []
+    assert FakeEnv.instances[-1].closed
+
+
+def test_network_jitter_does_not_invalidate_paused_frame_labels(settings):
+    session, packet = begin(settings)
+    result = step(session, packet, age=.8)
+    assert result["latency_warning"] and result["quality_ok"]
+    assert result["outcome"]["success"]
+    assert session.save()["accepted"]
+    assert session.writer.manifest["collection"]["quality_policy"] == "lockstep_input_hold_v2"
+
+
+def test_abort_explains_missing_waypoint_without_claiming_completion(settings):
+    session, _ = begin(settings)
+    session.info.update(waypoint=2, position=[-11.66, 0, 7.43])
+    result = session.abort()
+    assert result["outcome"] == {"completed": 2, "total": 5, "success": False, "reason": ""}
     assert FakeEnv.instances[-1].closed
 
 

@@ -25,9 +25,10 @@ from .dataset import EpisodeWriter, split_seed, write_json
 from .env import ROOT, ValorantEnv
 from .recording import look_action
 from .scenario import load_scenario, validate_scenario
+from .guidance import route_guidance
 
 COURSES = {
-    "lotus_route": ("01 · 路线行走", "沿 A Root 向 A 入口前进，转弯后继续走到终点。"),
+    "lotus_route": ("01 · 路线行走", "本课只走路，不需要开枪。沿通道依次经过 5 个路线点，到达 A 入口即完成。首次操作请选择带引导练习：跟随黄色点前进，青色圈是终点。"),
     "lotus_shooting": ("02 · 停稳射击", "沿路线前进，停稳后击杀可见敌人，再继续到入口。"),
     "lotus_reload": ("03 · 换弹与前进", "初始弹匣为空，换弹后处理可见敌人并完成路线。"),
     "lotus_recovery": ("04 · 调整视角", "先把视角恢复到正常高度，再完成同一条路线。"),
@@ -49,6 +50,7 @@ class Settings:
     queue: Path = ROOT / "runs/ppo-movement-combat/corrections"
     state_dir: Path = ROOT / "runs/web"
     max_frame_age_ms: float = 250
+    max_input_hold_ms: float = 250
     control_timeout: float = 3
     idle_timeout: float = 120
     source: str = "human"  # Non-human test harnesses must override; no production CLI switch.
@@ -106,6 +108,9 @@ class HumanSession:
         if self.state not in ("idle", "saved"):
             raise ValueError("Finish or discard this episode before opening another")
         self.config, self.case_path, self.case = Catalog(self.settings).resolve(request.get("task"))
+        self.guided = request.get("guided", False)
+        if type(self.guided) is not bool:
+            raise ValueError("Invalid guided practice mode")
         self.split = request.get("split", "train")
         seed_index = request.get("seed", 0)
         if type(seed_index) is not int or self.split not in ("train", "validation"):
@@ -139,15 +144,23 @@ class HumanSession:
                 "period_ms": self.config["action_repeat"] / self.config["physics_hz"] * 1000,
                 "success": bool(self.info.get("is_success")),
                 "reason": self.info.get("termination_reason", ""),
+                "outcome": self.outcome() if self.state == "review" else None,
                 "quality_ok": not self.writer or not self.writer.manifest["quality_issues"],
-                "step": self.info.get("step", 0), "source": self.settings.source}
+                "step": self.info.get("step", 0), "source": self.settings.source,
+                "guided": self.guided,
+                "guidance": route_guidance(self.config, self.info) if self.guided else None}
 
     def start(self):
         if self.state != "ready":
             raise ValueError("Open a course before starting")
+        if self.guided:
+            self.state = "active"
+            return self.packet()
         self.writer = EpisodeWriter(self.settings.output, self.config, self.seed, split=self.split,
                                    case_id=self.case["id"] if self.case else None, source=self.settings.source)
         self.writer.manifest["collection"] = {"transport": "browser_png_lockstep_v1",
+            "quality_policy": "lockstep_input_hold_v2",
+            "max_input_hold_ms": self.settings.max_input_hold_ms,
             "max_frame_age_ms": self.settings.max_frame_age_ms, "mouse_scale": self.mouse_scale,
             "engine": getattr(self.env, "engine_metadata", {})}
         self.state = "active"
@@ -182,33 +195,52 @@ class HumanSession:
         action[3], action[4] = look_action(self.config, dx, dy, self.mouse_scale)
         action[5], action[6], action[7] = int("Space" in keys), int(request["fire"]), int(request["reload"])
         age = (received_at - self.sent_at) * 1000
-        if age > self.settings.max_frame_age_ms:
-            self.writer.issue("browser_frame_age_exceeded")
+        hold = sampled - self.presented["browser_ms"]
+        # The engine is paused while this exact frame is in flight. Round-trip
+        # latency changes playback speed, not the observation/action pairing.
+        if self.writer and hold > self.settings.max_input_hold_ms:
+            self.writer.issue("browser_input_hold_exceeded")
         timing = {"clock": "browser_paced_lockstep", "browser_frame_id": self.frame_id,
                   "browser_displayed_ms": self.presented["browser_ms"], "browser_input_ms": sampled,
                   "server_frame_received": self.received_at, "server_frame_sent": self.sent_at,
                   "server_display_ack": self.presented["server_at"], "server_input_received": received_at,
-                  "frame_age_ms": age, "mouse_dx": dx, "mouse_dy": dy, "degrees_per_pixel": self.mouse_scale}
+                  "frame_age_ms": age, "input_hold_ms": hold,
+                  "latency_warning": age > self.settings.max_frame_age_ms,
+                  "mouse_dx": dx, "mouse_dy": dy, "degrees_per_pixel": self.mouse_scale}
         self.presented = None  # consume this frame exactly once, before advancing the world
         timing["server_step_started"] = time.monotonic()
         after_frame, _, done, truncated, after = self.env.step(action)
         timing["server_step_finished"] = time.monotonic()
-        self.writer.append(self.frame, action, before=self.info, after=after, timing=timing)
+        if self.writer:
+            self.writer.append(self.frame, action, before=self.info, after=after, timing=timing)
         self.frame, self.info = after_frame, after
         self.received_at = timing["server_step_finished"]
         if done or truncated:
             self.state = "review"
-            self.close_engine()
+            # The engine has already stopped simulation. Send the result before
+            # process teardown (close can block for several seconds).
         packet = self.packet()
         packet["frame_age_ms"] = age
+        packet["latency_warning"] = age > self.settings.max_frame_age_ms
         packet["engine_step_ms"] = (timing["server_step_finished"] - timing["server_step_started"]) * 1000
         return packet
 
+    def outcome(self):
+        return {"completed": self.info.get("waypoint", 0),
+                "total": len(self.config.get("waypoints", [])),
+                "success": bool(self.info.get("is_success")),
+                "reason": self.info.get("termination_reason", "")}
+
     def save(self):
+        if self.state == "review" and self.guided:
+            self.close_engine()
+            self.state = "saved"
+            return {"type": "saved", "accepted": False, "guided": True}
         if self.state != "review" or self.writer is None:
             raise ValueError("Only a completed episode can be submitted")
         directory = self.writer.finish(self.info, accepted=bool(self.info.get("is_success")))
         accepted = self.writer.manifest["accepted"]
+        self.close_engine()
         if accepted and self.case:
             update_case(self.case_path, status="demonstrated", demonstration=directory.name)
         self.state = "saved"
@@ -221,6 +253,7 @@ class HumanSession:
             self.env = None
 
     def abort(self, reason="discarded"):
+        outcome = self.outcome() if hasattr(self, "config") else None
         try:
             if self.writer is not None and not self.writer.closed:
                 self.writer.issue(reason)
@@ -229,7 +262,7 @@ class HumanSession:
             self.close_engine()
             self.writer = None
             self.state = "idle"
-        return {"type": "stopped", "reason": reason}
+        return {"type": "stopped", "reason": reason, "outcome": outcome}
 
 
 def token_file(path):
@@ -412,7 +445,8 @@ def serve(args):
             raise RuntimeError("NVIDIA display is not ready. Use scripts/run_cloud.sh web, or --allow-software for diagnostics only.\n" + result["output"])
         os.environ["VALORANT_LAB_GPU_REQUIRED"] = "1"
     settings = Settings(output=Path(args.output), queue=Path(args.queue), state_dir=Path(args.state_dir),
-                        max_frame_age_ms=args.max_frame_age_ms, control_timeout=args.control_timeout)
+                        max_frame_age_ms=args.max_frame_age_ms, max_input_hold_ms=args.max_input_hold_ms,
+                        control_timeout=args.control_timeout)
     token = token_file(args.token_file)
     print(f"访问口令文件：{Path(args.token_file).resolve()}（不要放进 URL 或 Git）", flush=True)
     print("浏览器示范使用逐帧确认的步进模式；实际游戏原速性能需单独 evaluate --realtime。", flush=True)
