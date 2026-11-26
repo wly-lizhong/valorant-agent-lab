@@ -1,5 +1,34 @@
 # 验证记录
 
+## 2026-11-26：0.3 版云端启动与浏览器采集
+
+本次使用无 GPU 的开发电脑进行轻量检查，未再次运行地图渲染或训练。Python 检查在 WSL Ubuntu 24.04 / Python 3.12，网页实测在本机 Edge，使用明确标记 `script_test` 的合成画面；没有连接实际云服务器。
+
+| 检查 | 实际结果 |
+| --- | --- |
+| Python 单元与 HTTP/WebSocket 集成测试 | 全部 58 项通过；含原有 24 项及新增 34 项 |
+| 标签与质量控制 | 记录动作前的 RGB；缺少/重复展示确认、旧帧号、无效输入拒绝执行；延迟、未确认和中断数据不进入训练 |
+| 纠错衔接 | 从原始种子重开；拒绝把纠错写入验证组；成功提交只标记 demonstrated |
+| 连接管理 | 登录、Host/Origin、独占控制、断线清理和控制超时通过合成环境集成测试 |
+| GPU 启动逻辑 | 软件渲染拒绝、PCI 地址转换、私有显示/口令清理及中断子进程清理通过模拟测试；未证明真实 Xorg 驱动适配 |
+| 实际引擎设备门槛 | 模拟 ready.json 检查 NVIDIA、Mesa、伪混合与缺字段；非 NVIDIA/软件渲染拒绝启动 |
+| C# 编译 | 新增渲染设备元信息后，0 错误、0 警告 |
+| JavaScript | `node --check` 通过；Edge 登录、加载、Pointer Lock、90 帧往返与确认保存实际走通 |
+| 测试数据隔离 | 浏览器合成记录保存至 runs/ui-test，来源 script_test，普通学习器拒绝使用；未生成真人示范或可用模型 |
+
+页面验证的是前后端交互，不是实际地图手感；合成画面的帧耗时不能当云端游戏性能。首版 PNG 通道以逐帧确认换取可检查的标签，网络与引擎耗时会使人工游玩减速。真实 NVIDIA 图形启动、WAN 延迟、连续运行、真人试采/重放及模型原速成绩仍待验证，步骤见[云端指南](cloud-workflow.md)。
+
+无需 GPU 的复现方式：
+
+```bash
+pip install -e '.[test,web]'
+python -m pytest -q
+node --check src/valorant_lab/web_static/app.js
+python tests/serve_web_fixture.py
+```
+
+最后一条只启动 loopback 合成测试页面，端口 8766；测试口令在脚本说明中，不是生产口令。生产服务使用随机口令，不能把测试环境当真人采集入口。GitHub CI 仍是 `ci/checks.yml` 模板，本次结果来自实际本地执行。
+
 ## 2026-11-25：0.2 版移动交战与示范学习工具
 
 环境：Windows 工作电脑中的 WSL Ubuntu 24.04，Python 3.12、Godot 4.7.2 .NET、.NET SDK 8.0.428，Xvfb + Mesa llvmpipe 软件渲染。PyTorch 2.8.0 CPU、SB3 2.9.2、Gymnasium 1.4.0、NumPy 2.2.6、pygame 2.6.1。未使用主力 NVIDIA 服务器。

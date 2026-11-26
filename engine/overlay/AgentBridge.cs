@@ -41,7 +41,9 @@ public partial class AgentBridge : Node
         File.WriteAllText(readyPath, JsonSerializer.Serialize(new {
             protocol = 1, revision = 2, port = ((IPEndPoint)listener.LocalEndpoint).Port,
             pid = System.Environment.ProcessId, scenario = config.Id, map = config.Map,
-            action_sizes = config.ActionSizes, clock = realtime ? "realtime" : "lockstep"
+            action_sizes = config.ActionSizes, clock = realtime ? "realtime" : "lockstep",
+            render_device = RenderingServer.GetVideoAdapterName(),
+            render_vendor = RenderingServer.GetVideoAdapterVendor()
         }));
         _ = System.Threading.Tasks.Task.Run(Serve);
     }

@@ -52,6 +52,7 @@ class ValorantNavigationEnv(gym.Env):
         self.config = load_scenario(self.scenario_path)
         self.realtime = realtime
         self.last_engine_seed = None
+        self.engine_metadata = {}
         self.render_mode = render_mode
         self.action_space = spaces.MultiDiscrete(action_sizes(self.config))
         self.noop = noop(self.config)
@@ -116,6 +117,12 @@ class ValorantNavigationEnv(gym.Env):
                         raise RuntimeError("Engine overlay is outdated; rerun scripts/bootstrap.py")
                     if data.get("clock") != ("realtime" if self.realtime else "lockstep"):
                         raise RuntimeError("Engine clock mismatch")
+                    self.engine_metadata = {k: data.get(k) for k in ("revision", "render_device", "render_vendor", "clock")}
+                    if os.environ.get("VALORANT_LAB_GPU_REQUIRED") == "1":
+                        from .cloud import SOFTWARE
+                        renderer = (str(data.get("render_vendor", "")) + " " + str(data.get("render_device", ""))).lower()
+                        if "nvidia" not in renderer or any(word in renderer for word in SOFTWARE):
+                            raise RuntimeError("The game did not report NVIDIA rendering; rebuild the overlay and check GPU graphics configuration")
                     return int(data["port"])
                 except json.JSONDecodeError:
                     pass  # Atomic readiness is not assumed while file is being written.

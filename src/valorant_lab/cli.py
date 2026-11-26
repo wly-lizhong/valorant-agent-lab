@@ -135,6 +135,11 @@ def replay(args):
     run(args)
 
 
+def web_control(args):
+    from .web_control import serve
+    serve(args)
+
+
 def doctor(args):
     local_path = ROOT / "local.json"
     if not local_path.exists():
@@ -217,6 +222,18 @@ def main():
     playback.add_argument("--output", default="runs/replay")
     playback.add_argument("--paced", action="store_true")
     playback.set_defaults(func=replay)
+    browser = commands.add_parser("web", help="中文浏览器示范与纠错入口；云端运行游戏")
+    browser.add_argument("--host", default="127.0.0.1")
+    browser.add_argument("--port", type=int, default=8765)
+    browser.add_argument("--origin", action="append", help="Exact browser origin; repeat for multiple hosts")
+    browser.add_argument("--output", default="runs/demonstrations")
+    browser.add_argument("--queue", default="runs/ppo-movement-combat/corrections")
+    browser.add_argument("--state-dir", default="runs/web")
+    browser.add_argument("--token-file", default="runs/web/access-token")
+    browser.add_argument("--max-frame-age-ms", type=float, default=250)
+    browser.add_argument("--control-timeout", type=float, default=3)
+    browser.add_argument("--allow-software", action="store_true", help="CPU rendering diagnostics only, not cloud performance acceptance")
+    browser.set_defaults(func=web_control)
     for sub in (smoke_parser, training, evaluation, recording, bc):
         sub.add_argument("--scenario", default=str(ROOT / "configs/lotus_navigation.json") if sub is smoke_parser else str(DEFAULT_TASK),
                          help="Scenario JSON; smoke defaults to navigation self-test, other commands to movement/combat")
@@ -233,9 +250,11 @@ def main():
         parser.error("--eval-every must be nonnegative")
     if hasattr(args, "seed") and not 0 <= args.seed < 100000:
         parser.error("--seed must be in [0, 100000)")
-    for name in ("learning_rate", "mouse_scale"):
+    for name in ("learning_rate", "mouse_scale", "max_frame_age_ms", "control_timeout"):
         if hasattr(args, name) and (not np.isfinite(getattr(args, name)) or getattr(args, name) <= 0):
             parser.error(f"--{name.replace('_', '-')} must be positive and finite")
+    if args.command == "web" and not 1 <= args.port <= 65535:
+        parser.error("--port must be in [1, 65535]")
     args.func(args)
 
 

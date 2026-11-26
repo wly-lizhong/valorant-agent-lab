@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Agent Lab · 人工示范台</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+<header><a class="brand" href="/">AGENT LAB <span>/ 人工示范台</span></a><span class="badge" id="connection">未连接</span></header>
+<main>
+  <section class="intro"><p class="eyebrow">LOTUS · 第一阶段</p><h1>把你会的操作，教给智能体。</h1><p>选择一项练习或待纠正任务，走完路线，提交一次完整示范。</p></section>
+  <section class="panel" id="login-panel">
+    <h2>连接训练服务器</h2>
+    <form id="login-form"><label for="token">访问口令</label><div class="login-row"><input id="token" type="password" autocomplete="off" placeholder="粘贴服务器口令文件中的内容" required><button type="submit">连接</button></div></form>
+    <p class="muted">只需浏览器。游戏和录制在服务器运行，本机无需安装游戏。</p>
+  </section>
+  <section id="workspace" hidden>
+    <div class="layout">
+      <aside class="panel">
+        <div class="panel-title"><h2>选择任务</h2><button class="quiet" id="refresh" type="button">刷新</button></div>
+        <label for="task">基础课程 / 系统纠错</label><select id="task"></select>
+        <p id="task-description" class="description"></p>
+        <p id="case-status" class="muted"></p>
+        <div class="field-pair"><div><label for="split">示范用途</label><select id="split"><option value="train">训练集</option><option value="validation">验证集</option></select></div><div><label for="seed">场景编号</label><input id="seed" type="number" min="0" max="99999" value="42" step="1"></div></div>
+        <label for="mouse-scale">鼠标灵敏度</label><input id="mouse-scale" type="number" min="0.001" max="2" step="0.01" value="0.08">
+        <button id="open" type="button" class="wide">加载场景</button>
+        <div class="instructions"><h3>操作说明</h3><p><kbd>W A S D</kbd> 移动　<kbd>鼠标</kbd> 转视角</p><p><kbd>左键</kbd> 开枪　<kbd>R</kbd> 换弹</p><p><kbd>左 Shift</kbd> 慢走　<kbd>左 Ctrl</kbd> 蹲下</p><p><kbd>空格</kbd> 跳跃　<kbd>Esc</kbd> 退出本次</p><p class="muted">切换窗口或退出鼠标控制会停止本次录制。重新加载后可再试。</p></div>
+      </aside>
+      <section class="play-area">
+        <div class="viewport"><canvas id="game" width="256" height="144" tabindex="0" aria-label="服务器游戏画面"></canvas><div id="placeholder">选择任务后加载场景</div><span id="test-mode" hidden>模拟测试画面 · 不作为真人示范</span></div>
+        <div class="play-controls"><button id="start" type="button" disabled>开始操作并录制</button><button id="stop" type="button" class="secondary" disabled>停止并放弃</button><button id="save" type="button" hidden>确认提交成功示范</button></div>
+        <div class="panel feedback"><p id="status" role="status" aria-live="polite">等待加载。</p><div class="stats"><span>步数 <b id="steps">—</b></span><span>画面往返与操作 <b id="age">—</b></span><span>引擎步进 <b id="engine">—</b></span></div><p id="quality" class="muted">成功完成并经你确认的合格示范，才会进入训练集。</p></div>
+        <p class="footnote">当前为逐帧确认的操作模式。网络较慢时游戏会减速，画面尺寸与模型输入一致；原速游玩的流畅度另行评估。</p>
+      </section>
+    </div>
+  </section>
+  <p id="error" class="error" role="alert" hidden></p>
+</main>
+<footer>第一人称画面 → 人工动作 → 示范数据 → 模仿学习</footer>
+</body>
+</html>

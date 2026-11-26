@@ -1,75 +1,134 @@
-# 无桌面云端运行与低配开发端
+# 无桌面云端运行与浏览器示范台
 
-更新：2026-11-26。默认条件：本地是无 GPU 的低配开发电脑；训练在无桌面的 Linux 云服务器，使用 NVIDIA GPU。用户确认可用 sudo，具体 GPU 型号、实例类型与图形能力待核验。
+更新：2026-11-26，0.3 版。本地低配、无 GPU，只承担开发、SSH 和浏览器操作；地图渲染、示范保存、训练与评估放在 Ubuntu 22.04/24.04 x86_64 云端。已确认 NVIDIA 与 sudo，具体 GPU 型号和实例类型仍需核验。
 
-## 1. 默认分工
+## 1. 已实现的入口与边界
 
-| 位置 | 承担的工作 | 当前状态 |
-| --- | --- | --- |
-| 本地开发电脑 | 编辑代码、Git、轻量测试、SSH、浏览器看画面和发送键鼠 | 不要求本地运行训练器、渲染地图或训练模型 |
-| 云端游戏/交互实例 | 加载地图、真实画面渲染、执行人工或模型动作、记录示范、回合评估 | 现有 Linux 引擎可运行；GPU 图形环境和浏览器入口待接入验证 |
-| 云端学习进程 | BC、PPO 更新、检查点、数据与失败题库 | 已有命令；主力云服务器尚未实际验收 |
-
-优先让交互与训练放在同一台兼容的云服务器，按资源调度分别运行。若该实例只适合 CUDA 计算，则把游戏/交互放在另一台支持图形的云实例；现有 PPO 要在能运行引擎的实例上执行，仓库尚无跨主机 rollout 服务。离线 BC 可以单独放在计算实例。
+| 功能 | 当前状态 |
+| --- | --- |
+| 云端依赖与诊断 | `setup_cloud.sh`、`python -m valorant_lab.cloud check`；分别报告 NVIDIA 设备和实际 OpenGL 渲染 |
+| 无显示器 GPU 会话 | 独立 NVIDIA Xorg 配置、私有 Xauthority、自动检查；只清理自己启动的显示进程 |
+| 中文浏览器示范台 | `web` 命令；五个课程、失败题库、鼠标锁定、移动/开枪/换弹、确认提交 |
+| 画面与动作对齐 | 无损 PNG + WebSocket；当前画面展示确认后才接受对应动作，不执行旧帧动作队列 |
+| 质量控制 | 失焦、断线、超时、过期画面、未成功或未确认的示范不进入普通 BC |
+| 学习衔接 | 沿用示范格式、BC/PPO 与开发评估；提交后需运行下一次训练，不会即时改变模型 |
+| 真实云端验收 | 尚未执行；当前没有目标服务器连接信息，不宣称 GPU 加速或公网手感已通过 |
 
 ```mermaid
 flowchart LR
-    A[本地浏览器：显示视频、发送键鼠] <-->|串流与输入，待实现| B[云端交互实例：训练器与示范记录]
-    B --> C[云端数据、场景与失败题库]
-    C --> D[云端 BC / PPO 与评估]
+    A[低配本地浏览器] <-->|PNG 画面与键鼠消息| B[云端示范台与专用游戏进程]
+    B --> C[云端示范数据与失败题库]
+    C --> D[云端 BC / PPO 与自主评估]
     D --> C
     C --> B
 ```
 
-无人训练时不依赖浏览器保持连接；人工领题时使用单独交互实例，避免和训练进程争抢控制权。初期可以暂停采样以腾出资源，不承诺单卡同时训练和串流仍保持满速。
+模型与游戏同机运行，不经浏览器转发动作；无人训练时可关闭浏览器。首版每个示范台允许一个人工控制连接，人工与训练进程各自拥有引擎，优先分时使用 GPU。离线 BC 不需要渲染；仅适合 CUDA 计算的实例也可以承担它。当前 PPO 尚无跨主机 rollout 服务。
 
-## 2. 没有桌面图标仍然可以生成画面
+## 2. 云服务器软件准备
 
-服务器不需要完整桌面环境、物理显示器或人工点图标，但视觉智能体仍需要真实渲染输出。拟用与驱动兼容的后台显示/图形会话启动原生 Linux 游戏进程，再采集画面。具体配置由 GPU 型号、驱动和实例权限确定。
-
-Godot 的 `--headless` 会禁用渲染；本项目只能用它导入资源，不能用来提供策略的 RGB 观察。依据：[Godot 官方 DisplayServer 说明](https://docs.godotengine.org/en/stable/classes/class_displayserver.html#description)。
-
-当前 `scripts/run_linux.sh` 在没有 `DISPLAY` 时明确设置 `LIBGL_ALWAYS_SOFTWARE=1`，使用 Xvfb + CPU 软件渲染。它可以做功能自检，但没有自动完成云端 NVIDIA 图形配置。`doctor` 中 CUDA 可用也不等于图形或串流通过。正式长期 PPO 前必须检查实际引擎日志、画面和采样吞吐。
-
-离线 `bc-train` 只读取已采集的图片与动作，本身不启动游戏，所以可以直接在纯命令行 Linux 上运行。
-
-## 3. 云平台主要影响哪些条件
-
-平台品牌不改变学习目标或 BC/PPO 算法。实际差别在于租用实例提供的能力：
-
-| 条件 | 对项目的影响 | 需要核验的证据 |
-| --- | --- | --- |
-| 完整虚拟机/裸机，还是托管容器 | 决定能否配置驱动、后台显示和设备访问 | 实例说明、宿主机与容器的权限边界；容器 sudo 不等于宿主机权限 |
-| GPU 型号和图形驱动 | CUDA 运算和 OpenGL 图形渲染需分别可用 | GPU 型号、驱动、引擎日志中的实际渲染设备、有效 RGB |
-| 视频编码能力 | 影响浏览器画面的带宽、延迟和 CPU 开销 | 实际编码器测试；硬件编码不可用时另评估软件编码，不能只看显存 |
-| 可访问的端口和转发方式 | 决定 HTTPS、WebSocket/WebRTC 等入口如何接通 | 平台端口映射、反向代理或受控隧道的实际可达性 |
-| 持久磁盘和进程生命周期 | 避免关机/容器重建后示范与模型丢失 | 数据盘挂载与重启测试；SSH 断开后任务仍可运行 |
-
-NVIDIA 官方把 `compute`、`utility`、`graphics`、`display`、`video` 分为不同驱动能力；容器默认通常只请求 `compute,utility`。因此 `nvidia-smi` 正常、PyTorch 能训练，都不能单独证明游戏渲染或编码可用。容器需按用途配置对应能力，具体取决于宿主机与运行时；不是在容器里随便加一个环境变量就能补齐宿主机缺失的支持。依据：[NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html)。
-
-已确认 NVIDIA 和 sudo。准备实例时再取得具体 GPU 型号、驱动、实例类型及端口方式，不仅按“24–100 GB 显存”判断适配。通常可先查看：
+先完成 [README](../README.md) 的克隆、`setup_ubuntu.sh`、地图安装与引擎构建，再在仓库根目录执行：
 
 ```bash
-nvidia-smi --query-gpu=name,memory.total,driver_version --format=csv
-id
+source .venv/bin/activate
+bash scripts/setup_cloud.sh
+python -m valorant_lab.cloud check --output runs/cloud-check.json
 ```
 
-配置显示环境后再检查 OpenGL 与真实引擎画面。当前不提供未经目标机器验证的统一驱动安装或显示配置脚本。
+脚本安装 Xorg 核心、xauth、glxinfo 和浏览器服务依赖，不安装完整桌面，也不安装、替换 NVIDIA 驱动。平台应事先提供可工作的图形驱动与 Xorg NVIDIA 模块。尚未启动显示时 `graphics.ok=false` 是预期状态；`check --require-gpu` 会在图形检查不通过时返回失败，适合正式启动前使用。
 
-## 4. 首批示范之前必须补齐的工作
+平台品牌不改变算法，但实例权限和驱动能力影响图形进程。容器 sudo 不等于宿主机权限；`nvidia-smi` 或 PyTorch CUDA 成功不能证明 OpenGL 可用。NVIDIA 区分 `compute`、`utility`、`graphics`、`display`、`video` 能力，默认容器可能只启用前两项。设备和能力需由平台/宿主机配置，不能只在运行中的容器添加环境变量补齐。[NVIDIA 官方说明](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/latest/docker-specialized.html)
 
-1. **云端真实渲染验收**：同一地图与动作接口运行成功；日志确认实际 GPU 渲染设备；测单环境采样速度，不把本地软件渲染速度当云端结果。
-2. **最小远程人工入口**：浏览器打开云端交互实例，能相对转头、移动、开枪、换弹、开始/重试/提交；失焦和断线释放输入。考虑复用 [Selkies 的 HTML5 串流与输入能力](https://docs.selkies.io/latest/components/web-client/)，当前尚未选定依赖或完成集成。
-3. **网络条件下的数据对齐**：记录浏览器实际显示的帧、输入产生/到达/执行时刻；现有本地录制器的服务器侧时间戳不能自动代替浏览器显示时间。先验证回放与标签，延迟异常片段标记或排除。
-4. **少量真人示范与云端 BC**：通过正常课程后，再扩大采集并训练；独立评估和异步纠错题库沿用现有接口。
-5. **PPO 与实时验收**：在云端比较收益，随后单独处理未来 CPU/低配部署。当前开发电脑配置不等于最终运行硬件的性能结论。
+首版 PNG 通道不依赖 NVENC；未来接视频串流时再核验编码能力。24–100 GB 显存只是训练预算，不代表图形能力已通过。
 
-本地录制窗口是可复用的现有工具，供有合适图形条件的机器或云端图形会话使用；不再要求当前开发电脑先完成游戏试玩和录制。浏览器控制现在是本项目首批远程人工数据的前置工作，完整任意时刻快照仍可后置。
+## 3. 启动 GPU 图形会话
 
-浏览器的解码负载、网络和输入延迟仍需实测，可调整串流分辨率与帧率。仅把整个远程桌面展示出来可用于机制试操作；未验证帧与动作对齐前，不宣称已经得到可靠的 FPS 训练标签。训练 RPC 继续只监听 loopback，远程入口另设鉴权与连接管理。
+**普通账号＋sudo：推荐分开运行显示服务和训练。** 终端 A 在仓库目录执行并保持存活：
 
-## 5. 现有工程与新计划的边界
+```bash
+sudo .venv/bin/python -m valorant_lab.cloud display --display 99
+```
 
-已实现：Linux 引擎接口、CPU 渲染回退、CLI 训练/评估、本地采集器、重放、BC/PPO、异步纠错题库。
+脚本使用 GPU 0，打印 `DISPLAY` 和 `XAUTHORITY` 路径。终端 B 保持普通账号，复制打印出的实际路径：
 
-尚未实现或验证：目标云端 GPU 显示配置、浏览器人工控制、网络帧/动作对齐，以及实际云实例的连续运行性能。本次更新修正分工与实施顺序，没有部署服务、开放端口或宣称串流已经可用。
+```bash
+source .venv/bin/activate
+export DISPLAY=:99
+export XAUTHORITY=/实际仓库路径/runs/gpu-display-实际编号/Xauthority
+python -m valorant_lab.cloud check --require-gpu
+bash scripts/run_cloud.sh smoke
+```
+
+使用其他 GPU 时在显示命令加 `--gpu 1`。显示号被占用会拒绝启动，应换空闲编号，不删除已有锁文件。已有 NVIDIA `DISPLAY` 可直接复用。
+
+**平台默认 root 登录：** 无 `DISPLAY` 时直接 `bash scripts/run_cloud.sh smoke` 或 `bash scripts/run_cloud.sh web`，启动器自动选择空闲显示号 90–119，为这条命令创建 GPU Xorg；命令退出后关闭自己的显示进程。普通账号无显示时会提示先用 sudo 显示命令。`VALORANT_LAB_GPU=1` 可选择另一张卡；复用显示时以该显示的 GPU 为准。
+
+配置使用 `AllowEmptyInitialConfiguration` 与 `UseDisplayDevice=none`，不依赖显示器 EDID，不修改 `/etc/X11`，不接管已有桌面。实例仍可能因驱动、设备或虚拟终端权限拒绝启动；检查 `runs/gpu-display-*/Xorg.log` 和 `launcher.log`。[NVIDIA 配置依据](https://download.nvidia.com/XFree86/Linux-x86_64/580.105.08/README/xconfigoptions.html)
+
+启动器先检查 `glxinfo -B`，再要求游戏 `ready.json` 中的 `render_vendor` / `render_device` 报告 NVIDIA，缺少字段会要求重建引擎。字段来自 [Godot RenderingServer](https://docs.godotengine.org/en/stable/classes/class_renderingserver.html)。有效画面和吞吐还需 smoke/试玩验证。
+
+`run_linux.sh` 继续保留：无 `DISPLAY` 时使用 Xvfb + CPU 软件渲染，仅作诊断。Godot `--headless` 禁用渲染，只用于资源导入，不用于像素观察。[Godot 说明](https://docs.godotengine.org/en/stable/classes/class_displayserver.html#description)
+
+## 4. 浏览器连接：先使用 SSH 隧道
+
+云端终端 B：
+
+```bash
+bash scripts/run_cloud.sh web
+```
+
+默认绑定 `127.0.0.1:8765`。另一个云端终端读取生成的口令：
+
+```bash
+cat runs/web/access-token
+```
+
+本地 PowerShell/终端建立隧道，替换账号与服务器地址：
+
+```text
+ssh -N -L 8765:127.0.0.1:8765 USER@SERVER
+```
+
+保持隧道窗口运行，浏览器打开 [http://127.0.0.1:8765](http://127.0.0.1:8765)，粘贴口令连接。口令不进 URL、Git 或访问日志，Linux 文件权限为 600。登录会话有效期 12 小时，cookie 使用 HttpOnly / SameSite=Strict；重启服务清除会话，口令文件保持不变。
+
+这条路径只要求 SSH 可达，无需开放公网 8765。端口被占用时可把本地和服务端统一改为其他端口；两端端口不同则用 `--origin http://127.0.0.1:本地端口` 配置浏览器真实地址。
+
+[Pointer Lock](https://developer.mozilla.org/en-US/docs/Web/API/Pointer_Lock_API) 接收相对鼠标移动，应使用桌面浏览器、localhost 安全上下文或 HTTPS。公网已有 HTTPS 反代时可用：
+
+```bash
+bash scripts/run_cloud.sh web --origin https://agent.example.com
+```
+
+反代须转发 WebSocket Upgrade、原始 Host 和 Origin。同机反代保留后端 loopback；跨容器才按实际网络选择绑定地址并限制入口。非 localhost 的 HTTP Origin 会被拒绝。当前不自动安装 TLS/反代、不开防火墙；底层训练 RPC 不直接暴露公网。
+
+## 5. 页面操作与领取纠错题
+
+1. 先选“路线行走”、训练集和场景编号，加载场景。编号 0–99999；同一编号的训练/验证映射到不同种子区间。
+2. 点击“开始操作并录制”。WASD 移动、鼠标转头、左键开枪、R 换弹；左 Shift 慢走、左 Ctrl 蹲、空格跳跃。
+3. 完成课程后自动退出鼠标锁定。确认本次是希望模型学习的成功操作，再提交。
+4. Esc、切走窗口、隐藏标签页或断线会中止本次，重新加载即可再试。失败或质量不合格的记录只供检查。
+5. 练习射击、换弹和视角恢复后做组合课程；保留独立验证示范。先少量试采、重放，再扩大。
+
+开发评估出题后点击“刷新”即可领取，无需盯着模型决定何时接管。列表显示目标、出现次数和状态。当前从原始种子重开回合，不能恢复到失败瞬间。纠错示范固定进入训练组；接受后状态是 `demonstrated`，不是“模型已学会”。
+
+默认队列为 `runs/ppo-movement-combat/corrections`。评估若用 `--queue runs/corrections`，示范台也应使用 `web --queue runs/corrections`，保持相同目录。
+
+## 6. 数据对齐与手感限制
+
+服务端发送模型实际使用的 256×144 RGB 的无损 PNG。浏览器解码、绘制，在 animation frame 回调后确认帧号与展示时间，再按动作周期采集输入。服务器只接受当前已确认帧的一次动作，执行 3 个 60 Hz 子步后再发图。等待期间世界不推进，避免把晚到输入标到用户未见过的新画面。
+
+这是可检查的首批数据通路，不是 WebRTC 原速串流。动作的模拟时长为 50 ms，墙钟周期还包含网络、浏览器绘制、编码和引擎耗时，因此不能宣称浏览器原速达到 20 Hz。RAF 只是软件展示时间估计，不是物理显示器呈现的证明；人类反应延迟仍存在。画面更新期间鼠标位移不累积到下一帧，按住的键维持状态。
+
+`diagnostics.jsonl` 分别保存浏览器显示/采样时间与服务端收帧/发帧/收输入/执行时间；两个时钟域不直接相减。`frame_age_ms` 指服务器发图到收到动作的耗时，包含网络、展示和本帧操作周期，不是单程网络延迟。引擎耗时另记 `engine_step_ms`。默认任一帧超过 250 ms 即排除整段；`--max-frame-age-ms` 可调整并记入元信息，调大不改善手感。活动连接默认 3 秒无控制消息结束，等待/结果界面 120 秒无消息关闭。
+
+保存的仍是动作前 RGB 和实际执行的量化动作；特权诊断不进模型。新增 `collection.transport=browser_png_lockstep_v1`、灵敏度、质量门槛及渲染设备。未确认、失败或异常数据不用于普通 BC；`script_test` 测试来源会被普通训练拒绝。
+
+## 7. 后续验收与训练
+
+1. 云实例完成 GPU 检查、smoke、真实画面和机制验证。
+2. 浏览器真人试采 1–2 段，检查转向、停稳射击、换弹、HUD 与重放差异；网络慢先改善实例距离/连接，不靠放宽质量门槛宣称合格。
+3. 逐步采集训练/验证数据，执行 [BC → 自主评估 → 补课 → PPO](stage1-guide.md)。数据和模型存持久盘，`runs/` 不进 Git。
+4. 模型独立 `evaluate --realtime`，分别报告任务完成与时序；浏览器录制通过不能代替原速成绩。
+5. 如果 PNG 步进明显妨碍示范，再接 WebRTC/编码与连续采集的展示反馈；保留本版作为对齐基准。完整状态快照、短难例切片继续后置。
+
+实际 GPU 实例、WAN 延迟、长期稳定性与模型能力仍待验证，工程结果见[验证记录](validation.md)。本次没有启动付费云实例或在公网部署服务。

@@ -2,7 +2,7 @@
 
 目标平台：Ubuntu 22.04/24.04 x86_64，系统 Python 3.10/3.12。脚本安装系统运行库，在项目内建立 Python 虚拟环境，并下载校验固定的 Godot 4.7.2 .NET 和 .NET SDK 8.0.428。首次需要网络，建议预留至少 10 GB 磁盘；GPU 库、训练日志和模型会继续占用空间。
 
-2026-11-26 默认分工已修正：当前本地电脑低配、无 GPU，只承担开发和远程操作。游戏渲染、示范采集、训练与评估放在无桌面云端。NVIDIA 与 sudo 已确认，具体 GPU 和实例类型待核验。见[云端工作流](cloud-workflow.md)；下面安装命令不代表已自动配好 NVIDIA 图形服务或浏览器入口。
+2026-11-26：本地低配、无 GPU，只承担开发和浏览器操作。游戏渲染、示范采集、训练与评估放在无桌面云端。NVIDIA 与 sudo 已确认，具体实例待核验。新增 `setup_cloud.sh`、`run_cloud.sh` 和 `web` 入口，按[云端工作流](cloud-workflow.md)安装、启动 GPU 显示和浏览器服务。
 
 ## Ubuntu
 
@@ -35,7 +35,7 @@ bash scripts/run_linux.sh train --device cpu --steps 256
 
 Godot 的 `--headless` 使用无画面的渲染器，不能生成训练需要的图像。本项目只在导入资源时使用它，运行阶段明确拒绝它。
 
-`run_linux.sh` 在没有 `DISPLAY` 时使用 Xvfb + Mesa 软件渲染，并设置 `LIBGL_ALWAYS_SOFTWARE=1`。这条回退路径用于功能检查，模型即使由 CUDA 加速，地图仍占 CPU。正式云端采样与真人操作之前，要配置能实际创建 GPU OpenGL 上下文的后台显示服务，再设置 `DISPLAY`，检查 `runs/engine-*/engine.log` 中的实际渲染设备和吞吐。无需完整桌面图标环境，但当前脚本未自动配置 GPU 显示服务。仅有 `DISPLAY` 或 `nvidia-smi` 成功均不足以判定通过。
+`run_linux.sh` 无 `DISPLAY` 时使用 Xvfb + Mesa 软件渲染，设置 `LIBGL_ALWAYS_SOFTWARE=1`，仅用于功能检查。正式云端使用 `run_cloud.sh`：复用经核验的 NVIDIA 显示，或在 root 权限下启动私有 Xorg；普通账号先按云端指南用 sudo 启动显示。它同时检查 OpenGL 和引擎实际渲染设备，不会静默退回 CPU。仍需核验有效画面与吞吐。
 
 WSLg 自带显示时可以直接运行。要测试无桌面路径：
 
@@ -45,16 +45,16 @@ DISPLAY= bash scripts/run_linux.sh smoke
 
 ## 正式训练、恢复和日志
 
-默认先补齐云端浏览器人工入口，在云端采集示范并运行 `bc-train`，再初始化 PPO；具体顺序见[云端工作流](cloud-workflow.md)。现有本地录制器可复用，但浏览器控制与网络数据对齐还需实现。离线 BC 无需运行 Godot，也无需 `DISPLAY`。下面的 PPO 命令应在云端渲染验收后使用，默认是新的移动交战任务；短训只检查工具链，不代表能力达标。
+先验收云端显示和浏览器手感，采集示范后运行 `bc-train`，再初始化 PPO，见[云端工作流](cloud-workflow.md)。离线 BC 不需要 Godot 或 `DISPLAY`。下面命令应在 GPU 渲染验收后使用，默认移动交战任务；短训只检查工具链，不代表能力达标。
 
 ```bash
-bash scripts/run_linux.sh train --device cuda --steps 100000 \
+bash scripts/run_cloud.sh train --device cuda --steps 100000 \
   --output runs/lotus-v1 --checkpoint-every 10000
 tensorboard --logdir runs/lotus-v1/tensorboard --host 127.0.0.1
 ```
 
 ```bash
-bash scripts/run_linux.sh train --device cuda --steps 100000 \
+bash scripts/run_cloud.sh train --device cuda --steps 100000 \
   --output runs/lotus-v1 --resume runs/lotus-v1/latest.zip
 ```
 
@@ -70,8 +70,9 @@ bash scripts/run_linux.sh train --device cuda --steps 100000 \
 git pull --ff-only origin main
 source .venv/bin/activate
 pip install -r requirements-train.txt
+pip install -e '.[web]'
 python scripts/bootstrap.py
-bash scripts/run_linux.sh smoke
+bash scripts/run_cloud.sh smoke
 ```
 
 保留 `local.json`、地图和 `runs/`。保存当前 Git SHA 以及 `pip freeze`，便于回到对应代码。不要在训练进程运行时切换代码。

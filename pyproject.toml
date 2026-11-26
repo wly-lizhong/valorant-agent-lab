@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valorant-agent-lab"
-version = "0.2.0"
+version = "0.3.0"
 description = "Visual movement/combat learning with demonstrations on a standalone CA-VAL-AIM simulator"
 requires-python = ">=3.10,<3.14"
 license = "GPL-3.0-or-later"
@@ -14,12 +14,16 @@ dependencies = ["gymnasium>=1.0,<2", "numpy>=1.26,<3", "Pillow>=10,<13"]
 train = ["stable-baselines3>=2.4,<3", "tensorboard>=2.17,<3"]
 test = ["pytest>=8,<10"]
 collect = ["pygame==2.6.1"]
+web = ["aiohttp>=3.14.5,<4"]
 
 [project.scripts]
 valorant-lab = "valorant_lab.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+valorant_lab = ["web_static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
