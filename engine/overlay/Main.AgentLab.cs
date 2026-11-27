@@ -41,8 +41,8 @@ public partial class Main
             inGame = true;
             AddChild(session);
             var bridge = new AgentBridge(session, config, int.Parse(CmdLine.After("--agent-port") ?? "0"),
-                CmdLine.After("--agent-ready") ?? throw new ArgumentException("Missing --agent-ready"),
-                CmdLine.Has("--agent-realtime"));
+                CmdLine.After("--agent-ready") ?? "",
+                CmdLine.Has("--agent-realtime"), CmdLine.After("--agent-human"));
             AddChild(bridge);
             GD.Print("[agent-lab] ready; loopback RPC, rendered RGB observations");
         }

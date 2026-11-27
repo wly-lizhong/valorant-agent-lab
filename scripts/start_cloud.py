@@ -163,7 +163,7 @@ def prepare(args):
         (ROOT / ".venv/.cloud-setup-fingerprint").write_text(fingerprint + "\n")
     else:
         print("依赖已准备，复用现有 .venv；需要重装时加 --reinstall。", flush=True)
-    maps = ROOT / "assets/maps-data"
+    maps = ROOT / "assets/maps-data-v2.15.0"
     if maps.exists() and any(maps.iterdir()):
         run_stage("校验已有地图（保留原文件）", [PYTHON, "scripts/assets.py", "verify", "--root", maps])
     else:

@@ -111,7 +111,8 @@ def test_actual_engine_renderer_is_verified(tmp_path, monkeypatch, vendor, devic
     scenario = module.ROOT / "configs/lotus_route.json"
     config = load_scenario(scenario)
     (tmp_path / "local.json").write_text(json.dumps({"godot": "test-godot", "dotnet": "test-dotnet",
-        "project": "test-project", "maps_dir": "test-maps"}))
+        "project": "test-project", "maps_dir": "test-maps",
+        "upstream_sha256": json.loads((module.ROOT / "dependencies.lock.json").read_text())["upstream"]["sha256"]}))
     monkeypatch.setattr(module, "validate_assets", lambda *a: {})
     monkeypatch.setenv("VALORANT_LAB_GPU_REQUIRED", "1")
     class Process:

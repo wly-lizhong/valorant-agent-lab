@@ -67,6 +67,22 @@ def test_missing_real_map_is_explicit(tmp_path):
         validate_assets(tmp_path, "lotus")
 
 
+def test_runtime_and_map_cannot_silently_use_old_version(tmp_path, monkeypatch):
+    from valorant_lab import env as module
+    with pytest.raises(ValueError, match="Engine version"):
+        module.validate_runtime({})
+    directory = tmp_path / "maps/lotus"
+    directory.mkdir(parents=True)
+    (directory / "manifest.json").write_text(json.dumps({"levels": ["geometry"]}))
+    (directory / "geometry.glb").write_bytes(bytes(4096))
+    (directory / "collision.json").write_text("old collision")
+    (tmp_path / "dependencies.lock.json").write_text(json.dumps({
+        "assets": {"map": "lotus", "files": {"maps/lotus/collision.json": "0" * 64}}}))
+    monkeypatch.setattr(module, "ROOT", tmp_path)
+    with pytest.raises(ValueError, match="Map version"):
+        module.validate_assets(tmp_path, "lotus")
+
+
 def test_incomplete_and_unsafe_map_manifest(tmp_path):
     directory = tmp_path / "maps/lotus"
     directory.mkdir(parents=True)

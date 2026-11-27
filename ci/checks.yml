@@ -33,6 +33,6 @@ jobs:
         with:
           dotnet-version: '8.0.x'
       - run: python scripts/bootstrap.py --source-only
-      - run: dotnet build external/CA-VAL-AIM/CaValAim/CaValAim.csproj --nologo
+      - run: dotnet build external/CA-VAL-AIM-v2.15.0/CaValAim/CaValAim.csproj --nologo
       # This job checks compilation only. It does not unpack the bundled map
       # or perform real-map rendering; run smoke separately for that check.

@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "valorant-agent-lab"
-version = "0.3.0"
+version = "0.4.0"
 description = "Visual movement/combat learning with demonstrations on a standalone CA-VAL-AIM simulator"
 requires-python = ">=3.10,<3.14"
 license = "GPL-3.0-or-later"

@@ -22,7 +22,7 @@ def main():
     install = sub.add_parser("install", help="Verify and unpack a local bundle")
     install.add_argument("--archive", type=Path, required=True)
     install.add_argument("--sha256", required=True)
-    install.add_argument("--destination", type=Path, default=ROOT / "assets/maps-data")
+    install.add_argument("--destination", type=Path, default=ROOT / "assets/maps-data-v2.15.0")
     verify = sub.add_parser("verify")
     verify.add_argument("--root", type=Path, default=ROOT / "assets")
     args = parser.parse_args()

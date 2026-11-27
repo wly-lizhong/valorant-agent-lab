@@ -51,16 +51,17 @@ def main() -> None:
     parser.add_argument("--platform", choices=["linux", "windows"])
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--source-only", action="store_true", help="Prepare and patch source without downloading tools")
+    parser.add_argument("--local-config", type=Path, default=ROOT / "local.json")
     args = parser.parse_args()
     target_os = args.platform or ("windows" if os.name == "nt" else "linux")
     lock = json.loads((ROOT / "dependencies.lock.json").read_text())
     cache = ROOT / ".cache"
     cache.mkdir(exist_ok=True)
     upstream = lock["upstream"]
-    upstream_dir = ROOT / "external" / "CA-VAL-AIM"
+    upstream_dir = ROOT / "external" / ("CA-VAL-AIM-" + upstream["tag"])
     stamp = upstream_dir / ".agent-lab-source.json"
     source_ready = stamp.exists() and json.loads(stamp.read_text())["sha256"] == upstream["sha256"]
-    source_zip = args.source_archive or cache / "upstream-v2.11.0.zip"
+    source_zip = args.source_archive or cache / ("upstream-" + upstream["tag"] + ".zip")
     if args.source_archive:
         if checksum(source_zip) != upstream["sha256"]:
             raise ValueError("Local source archive differs from pinned archive")
@@ -74,6 +75,9 @@ def main() -> None:
     if target_os == "linux" and not args.source_only:
         sdk = lock["dotnet_linux"]
         sdk_tar = fetch(sdk["url"], cache / "dotnet-linux.tar.gz", sdk["sha512"], "sha512")
+    if target_os == "windows" and not args.source_only:
+        sdk = lock["dotnet_windows"]
+        sdk_tar = fetch(sdk["url"], cache / "dotnet-windows.zip", sdk["sha512"], "sha512")
     if args.download_only:
         print("Verified downloads ready in .cache", flush=True)
         return
@@ -124,16 +128,15 @@ def main() -> None:
         dotnet.chmod(dotnet.stat().st_mode | 0o111)
     else:
         godot = next(tool_dir.rglob("Godot_*_console.exe"))
-        dotnet_command = shutil.which("dotnet")
-        if not dotnet_command:
-            raise RuntimeError("Install .NET 8 SDK for Windows, then rerun bootstrap")
-        dotnet = Path(dotnet_command)
-        dotnet_dir = dotnet.parent
-    local = {"godot": str(godot.resolve()), "dotnet": str(dotnet.resolve()),
+        dotnet_dir = ROOT / ".tools" / "dotnet-windows"
+        dotnet = dotnet_dir / "dotnet.exe"
+        if not dotnet.exists():
+            unpack_zip(sdk_tar, dotnet_dir)
+    local = {"upstream_sha256": upstream["sha256"], "godot": str(godot.resolve()), "dotnet": str(dotnet.resolve()),
              "project": str(project.resolve()), "maps_dir": str(args.maps_dir.resolve()) if args.maps_dir else ""}
     if args.maps_dir and not (args.maps_dir / "maps").is_dir():
         raise ValueError("--maps-dir must contain a maps subdirectory")
-    local_path = ROOT / "local.json"
+    local_path = args.local_config
     if local_path.exists() and not args.maps_dir:
         local["maps_dir"] = json.loads(local_path.read_text()).get("maps_dir", "")
     local_path.write_text(json.dumps(local, indent=2), encoding="utf-8")

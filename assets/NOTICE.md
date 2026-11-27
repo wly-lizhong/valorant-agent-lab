@@ -1,9 +1,9 @@
 # Lotus 地图资源说明
 
-本目录的 `lotus-assets.zip` 是用于本项目已验证训练场景的莲华古城（Lotus）资源包，来源为 CA-VAL-AIM v2.11.0 安装环境中的可选地图资源。
+本目录的 `lotus-assets.zip` 是用于本项目训练场景的莲华古城（Lotus）资源包，来源为 CA-VAL-AIM v2.15.0 安装环境中的可选地图资源。2026-11-27 更新碰撞与出生排除数据；15 个场景 GLB 与旧 v2.11 包相同。旧地图不能与新版采集合同混用。
 
 - 上游项目：[Pyromesis/CA-VAL-AIM](https://github.com/Pyromesis/CA-VAL-AIM)
-- 上游归属说明：[NOTICE](https://github.com/Pyromesis/CA-VAL-AIM/blob/v2.11.0/NOTICE)
+- 上游归属说明：[NOTICE](https://github.com/Pyromesis/CA-VAL-AIM/blob/v2.15.0/NOTICE)
 - 内容：地图 manifest、碰撞、出生排除区、15 个 GLB，以及本项目生成的逐文件校验清单。
 - SHA-256：见同目录的 `lotus-assets.sha256`。
 

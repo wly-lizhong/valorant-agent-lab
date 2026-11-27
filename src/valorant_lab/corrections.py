@@ -5,7 +5,7 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 from .dataset import write_json
-from .scenario import digest
+from .scenario import digest, contract
 
 LABELS = {"look_limit": "调整视角后继续原路线", "blocked_movement": "脱离障碍并继续前进",
           "reload_needed": "安全换弹并完成原任务", "combat": "处理可见敌人后继续路线",
@@ -39,7 +39,7 @@ def enqueue_failure(queue, config, engine_seed, trace, image, *, split, model_ha
     reason = classify_failure(trace)
     last = trace[-1]
     cell = [round(float(v) / 2) for v in last.get("position", [0, 0, 0])]
-    key = digest([config.get("family", config["id"]), reason, last.get("waypoint", 0), cell])[:16]
+    key = digest([contract(config)["engine"], config.get("family", config["id"]), reason, last.get("waypoint", 0), cell])[:16]
     directory = Path(queue) / key
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / "case.json"
@@ -53,7 +53,7 @@ def enqueue_failure(queue, config, engine_seed, trace, image, *, split, model_ha
         return path
     case = {"schema": "valorant-correction-v1", "id": key, "split": split, "status": "pending",
             "reason": reason, "title": LABELS[reason], "task": config.get("task", "Complete the route"),
-            "scenario": config, "engine_seed": engine_seed, "occurrences": 1,
+            "scenario": config, "engine_contract": contract(config), "engine_seed": engine_seed, "occurrences": 1,
             "model_hash": model_hash, "last_model_hash": model_hash,
             "replay": "restart_from_seed", "note": "从本次回合起点重做；当前不支持恢复任意时刻快照。"}
     write_json(path, case)
@@ -67,6 +67,8 @@ def load_case(path):
     case = json.loads(path.read_text(encoding="utf-8"))
     if case.get("schema") != "valorant-correction-v1" or case.get("split") != "dev":
         raise ValueError("Invalid correction case or protected test split")
+    if case.get("engine_contract") != contract(case["scenario"]):
+        raise ValueError("Correction task engine version changed; regenerate it with the current environment")
     return case
 
 

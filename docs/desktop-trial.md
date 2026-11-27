@@ -19,7 +19,7 @@
 - 仓库根目录 `local.json` 中有效的 `godot`、`project` 路径；不上传该文件。
 - 同一个图形会话的 `DISPLAY`、`XAUTHORITY`，以及需要时的 `DOTNET_ROOT`、NVIDIA 图形库环境变量。
 - `aiohttp`（项目 `web` 可选依赖）、系统 `libX11` / `libXtst`、`x11vnc` 和发行版 `novnc`。
-- 上游正常模式能找到真实地图：`external/CA-VAL-AIM/CaValAim/maps` 应指向已解压资源中的 `maps` 目录；已有路径先检查，不覆盖。
+- 上游正常模式能找到真实地图：`external/CA-VAL-AIM-v2.15.0/CaValAim/maps` 应指向已解压资源中的 `maps` 目录；已有路径先检查，不覆盖。
 
 以下命令在服务器执行，先进入仓库根目录，并使用**实际可用的图形会话环境**。不要盲目猜 `DISPLAY` 或替换正在运行的显示服务。
 

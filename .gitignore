@@ -22,6 +22,8 @@ __pycache__/
 bin/
 obj/
 local.json
+local.windows.json
+local.linux.json
 assets.local.json
 
 # Publish only the reviewed Lotus bundle; extracted maps stay local.

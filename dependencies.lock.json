@@ -1,10 +1,10 @@
 {
   "upstream": {
     "repository": "https://github.com/Pyromesis/CA-VAL-AIM",
-    "tag": "v2.11.0",
-    "commit": "1d6003158054d6a5762f62faf7e18eeffd5dafe3",
-    "url": "https://api.github.com/repos/Pyromesis/CA-VAL-AIM/zipball/v2.11.0",
-    "sha256": "22e0e3ca0279bfe4f16141e5b06e9260dd1ebd497e912d0231e018006e69695a"
+    "tag": "v2.15.0",
+    "commit": "f554802db8be362103efaa4c69d5071cd5b309d9",
+    "url": "https://api.github.com/repos/Pyromesis/CA-VAL-AIM/zipball/f554802db8be362103efaa4c69d5071cd5b309d9",
+    "sha256": "d47e65cb2c4c5d8e2e82b2aae4faddf9a578f5278a7f511379aef140a5820b5c"
   },
   "godot_version": "4.7.2",
   "godot_linux": {
@@ -19,5 +19,34 @@
     "version": "8.0.428",
     "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.428/dotnet-sdk-8.0.428-linux-x64.tar.gz",
     "sha512": "33212bb99a2bf003973d41106c7e8fe94208a12958ff601d4a476be379403c85a7dc9183a6ec64dfb44ded7102965be09f35add1758e68e9251bae7891d7b7bf"
+  },
+  "dotnet_windows": {
+    "version": "8.0.428",
+    "url": "https://builds.dotnet.microsoft.com/dotnet/Sdk/8.0.428/dotnet-sdk-8.0.428-win-x64.zip",
+    "sha512": "cce1dc5cfb2c5b73ddd9d3658f6009deb85be3a58dbec44a6dfe3910bb32b044ad2fc6bb28c77aded70c73270a204d207fe790dcb82ffca6c7b42c1335b51c21"
+  },
+  "assets": {
+    "map": "lotus",
+    "bundle_sha256": "479c756ee440f91dbaad8f9da649c7f671a0b3271605d33159d96971706d0727",
+    "files": {
+      "maps/lotus/Jam_ArtDefPathCExterior.glb": "1866fd1fa4f1d9fbe91d8e9f307600bbb6d9a4f01a6cff676e39da45687d1858",
+      "maps/lotus/Jam_Art_ASite.glb": "87951330b3263b1f2bb34233e1f9875102897be6f98fb745142f8c2da9e15101",
+      "maps/lotus/Jam_Art_AtkPathA.glb": "9f57d2f0b4289a4d546bebcbff7690a45dd39ed19774bb12844a8729d19c6324",
+      "maps/lotus/Jam_Art_AtkPathB.glb": "dd349b683ec272784dd2df7192c455d70cbaa9cda4935179c039fade402cac38",
+      "maps/lotus/Jam_Art_AtkPathC.glb": "c431b0a2bd602bf103da3d04815002954e9183701611cd4ea9b8e1c1b99372be",
+      "maps/lotus/Jam_Art_AtkSpawn.glb": "c6d850342fe5603b2713406e1a6f47863f091a5b3c35a693ed77e0e7d68da364",
+      "maps/lotus/Jam_Art_BSite.glb": "75b15bbd67d96988a8f56db00c1576f43ce248b9e623873018359cc537cf2281",
+      "maps/lotus/Jam_Art_CBConnector.glb": "27cd3821855955d2daf61ca4554a526e03ed36ffeea8f271a3948774f3f129cb",
+      "maps/lotus/Jam_Art_CSite.glb": "ae9caac5f5b321e93628d79ac84b9a0945081b29e84c44e9baf472619cf1b4cf",
+      "maps/lotus/Jam_Art_DefPathA.glb": "19fb6e6f7019b983738a3b6886aa257e20be9e10132506ba00ab31c9302acb10",
+      "maps/lotus/Jam_Art_DefPathB.glb": "db09efa764913cc4ef16031fb4bce0c40aec7edf4457909d76721973cb8ecac4",
+      "maps/lotus/Jam_Art_DefPathC.glb": "921b02b692bb6f8001090310bd76fd454f22114f6fffb9e5feb48d42c73ead4e",
+      "maps/lotus/Jam_Art_DefSpawn.glb": "29349c8666d3cd3cfecc64108bb7136acbb211b4b2bd405e334f9ffc6a426770",
+      "maps/lotus/Jam_Art_DoorBakeRooms.glb": "6dfab6664ccc803c3ffe1726e1c089aa55e1d4c883560ec47479eda65ce37a9f",
+      "maps/lotus/Jam_Changes_2023.glb": "87105b72eda6b7a5a421afc78de16f7a86aba61aefb18f253f2452ed65ead4f6",
+      "maps/lotus/collision.json": "f71d31505f3d21e11c3ddf81af02a35e905ea290b77584da3395923d88439780",
+      "maps/lotus/manifest.json": "ca83f388f05f8f1b1c9a318a623e79328213ebe99e194dd21042dc7b5544488e",
+      "maps/lotus/spawn_exclude.json": "39d9be571f5c9d65c4ab980e5f824c8a14c4425b33125938136abd4ec4559b66"
+    }
   }
 }

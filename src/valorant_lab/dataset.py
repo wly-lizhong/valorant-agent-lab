@@ -68,7 +68,9 @@ class EpisodeWriter:
         entry = {"index": self.manifest["steps"], "before": before, "after": after, "timing": timing}
         self.diagnostics.write(json.dumps(entry, allow_nan=False) + "\n")
         self.manifest["steps"] += 1
-        if before.get("clock", "lockstep") != "lockstep":
+        if before.get("clock") == "native_fixed_step":
+            validate_native_alignment(self.manifest["scenario"], before, after, timing)
+        elif before.get("clock", "lockstep") != "lockstep":
             self.issue("realtime_recording_requires_temporal_alignment_review")
         if "action_applied" in after and after["action_applied"] != action.tolist():
             self.issue("action_not_applied_as_recorded")
@@ -130,6 +132,22 @@ def load_episodes(root, config: dict, *, allow_test_data=False) -> list[tuple[Pa
         if prior != data["split"]:
             raise ValueError("The same scenario/seed occurs in both train and validation")
     return episodes
+
+
+def validate_native_alignment(config, before, after, timing):
+    duration = config["action_repeat"] / config["physics_hz"]
+    delta = after.get("simulation_time", -1) - before.get("simulation_time", -1)
+    recorded_duration = timing.get("simulation_dt", -1)
+    if (timing.get("alignment") != "rendered_pre_action_v1"
+            or timing.get("clock") != "native_fixed_step"
+            or before.get("clock") != "native_fixed_step"
+            or after.get("clock") != "native_fixed_step"
+            or type(before.get("step")) is not int or type(after.get("step")) is not int
+            or after.get("step") != before.get("step", -2) + 1
+            or not np.isfinite(delta) or abs(delta - duration) > .002
+            or not np.isfinite(recorded_duration) or abs(recorded_duration - duration) > 1e-6
+            or not 0 <= timing.get("completed", -1) - timing.get("input_sampled", 0) <= .3):
+        raise ValueError("Native pre-action frame/action timing mismatch")
 
 
 class DemonstrationDataset:

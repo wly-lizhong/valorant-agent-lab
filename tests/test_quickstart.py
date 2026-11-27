@@ -79,7 +79,7 @@ def test_tunnel_uses_actual_host_options_without_guessing_container_port():
 
 
 def test_repeated_start_preserves_data_and_skips_system_install(workspace, monkeypatch):
-    maps = workspace / "assets/maps-data"
+    maps = workspace / "assets/maps-data-v2.15.0"
     maps.mkdir(parents=True)
     (maps / "keep.bin").write_bytes(b"map")
     demo = workspace / "runs/demonstrations/keep.json"
@@ -96,7 +96,7 @@ def test_repeated_start_preserves_data_and_skips_system_install(workspace, monke
 
 
 def test_corrupt_existing_map_is_not_overwritten(workspace, monkeypatch):
-    maps = workspace / "assets/maps-data"
+    maps = workspace / "assets/maps-data-v2.15.0"
     maps.mkdir(parents=True)
     old = maps / "unrecognized.txt"
     old.write_text("keep")

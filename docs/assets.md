@@ -9,15 +9,15 @@
 SHA-256：
 
 ```text
-309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
+479c756ee440f91dbaad8f9da649c7f671a0b3271605d33159d96971706d0727
 ```
 
 在仓库根目录执行以下命令，无需再从工作电脑复制文件：
 
 ```bash
 python scripts/assets.py install --archive assets/lotus-assets.zip \
-  --sha256 309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
-python scripts/bootstrap.py --maps-dir assets/maps-data --skip-build
+  --sha256 479c756ee440f91dbaad8f9da649c7f671a0b3271605d33159d96971706d0727
+python scripts/bootstrap.py --maps-dir assets/maps-data-v2.15.0 --skip-build
 ```
 
 安装会拒绝覆盖非空目标目录，并逐文件校验包内清单。`--maps-dir` 指向 **包含 maps 子目录的目录**，不是 `maps/lotus`。
@@ -45,8 +45,8 @@ python scripts/bootstrap.py --maps-dir TRAINER_ROOT --skip-build
 
 ```bash
 python scripts/assets.py fetch --url "$MAP_BUNDLE_URL" \
-  --sha256 "$MAP_BUNDLE_SHA256" --destination assets/maps-data
-python scripts/bootstrap.py --maps-dir assets/maps-data --skip-build
+  --sha256 "$MAP_BUNDLE_SHA256" --destination assets/maps-data-v2.15.0
+python scripts/bootstrap.py --maps-dir assets/maps-data-v2.15.0 --skip-build
 ```
 
 带令牌的地址只通过本机环境变量传入，不写进仓库。工具只下载与校验，不上传资源。

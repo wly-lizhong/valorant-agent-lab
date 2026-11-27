@@ -4,7 +4,9 @@
 
 **当前版本提供第一阶段的环境和学习工具：沿路线移动 → 处理可见敌人 → 必要时换弹 → 继续到达目的地。尚未提供训练成熟、能流畅参战的模型。** 工程验证、学习效果和实时性能分别报告，见[验证记录](docs/validation.md)。
 
-**0.3 版提供中文浏览器示范台，并新增独立的中文选关实时试玩入口。** 本地低配、无 GPU 电脑用于写代码、SSH 和浏览器操作；地图渲染、示范保存、训练与评估放在无桌面 Linux 云端。示范台使用逐帧确认的 PNG 通道；实时试玩使用连续运行的游戏、VNC 画面与独立相对鼠标输入，目前不录制训练数据。云端 V100 已验证实际渲染、中文选关直达 Lotus、转向、开枪与返回选关；这不代表已验证长期低延迟或训练效果。见[示范采集指南](docs/cloud-workflow.md)与[中文选关实时试玩](docs/desktop-trial.md)。
+**0.4 开发分支 `windows-recorder`：Windows 本机选关、原生窗口录制，Linux 云端训练。** 引擎与地图锁定 CA-VAL-AIM v2.15.0；网络只在交换纠错题和完成的示范时使用，不参与本机游戏控制。双击 `start_windows.cmd` 打开中文入口；两端通过 GitHub Release 附件交换数据，导入时校验与去重。详见 [Windows 本机采集指南](docs/windows-capture.md)。需要本机能运行游戏，尚不承诺所有低配电脑的帧率与鼠标手感。
+
+原浏览器示范台和云端实时试玩继续保留，见[云端指南](docs/cloud-workflow.md)与[中文选关实时试玩](docs/desktop-trial.md)。云端试玩不录制训练数据。下载 Windows 分支不会自动更新现有云端服务，也不会把旧 v2.11 示范/权重混入新训练。
 
 ## 第一阶段现在能做什么
 
@@ -15,7 +17,8 @@
 | 完成判定 | 经过路线检查点、击杀本回合生成的敌人，并回到/到达终点；击杀不会单独结束任务 |
 | 观察 | 256×144 第一人称 RGB；基础 HP、护盾、弹药及换弹 HUD；最近 4 帧 |
 | 操作 | 移动、静步/蹲伏、跳跃、开火、换弹；水平/垂直最小非零视角增量 0.25° |
-| 人工数据 | 中文浏览器示范台与可选本地窗口；画面/动作绑定、场景/种子、时间和诊断记录；确认保存与重放 |
+| 人工数据 | Windows 中文选关与原生采集；动作前 RGB、实际执行动作、场景/种子与诊断；成功确认、卡顿淘汰与重放 |
+| 数据交换 | GitHub Release 题包/示范附件；哈希校验、版本检查、去重、训练/验证隔离；不将录像写进 Git 历史 |
 | 云端运行 | 无桌面 NVIDIA Xorg 启动、OpenGL 与实际引擎设备检查；SSH 隧道连接浏览器 |
 | 学习 | 离线行为克隆（BC）；BC 权重初始化 PPO；PPO 存档与恢复；模型与数据的控制契约检查 |
 | 纠错 | 开发评估自动生成去重题目；按原种子从回合起点重做；示范通过与模型复测通过分别记录 |
@@ -28,12 +31,18 @@
 ## 推荐使用顺序
 
 1. 在云端准备地图和引擎，核验 GPU 图形渲染，完成自检、机制检查。
-2. 通过浏览器示范台试采少量路线/射击示范，检查手感、画面/动作对齐与重放。
-3. 在云端训练 BC，独立评估整段任务；本地电脑不承担训练器渲染或模型训练。
+2. 在 Windows 本机试采少量路线/射击示范，检查手感、画面/动作对齐与重放，再上传附件。
+3. Linux 导入示范并训练 BC，独立评估整段任务；Windows 只承担本机游戏与录制，不训练模型。
 4. 按失败队列补课，混合正常示范重新训练；再比较 PPO 微调收益。
 5. 在实际目标硬件上做实时评估，随后扩展跟队、守点和爆破回合。
 
 详细操作见[第一阶段使用手册](docs/stage1-guide.md)。
+
+## Windows 本机录制
+
+安装 Python 3.10–3.13 和 Git 后，克隆 `windows-recorder` 分支，双击根目录的 `start_windows.cmd`。首次自动准备项目内的 Godot、.NET、地图和 Python 依赖，无需安装官方游戏或 CUDA。
+
+中文窗口中选择课程 → “开始本机录制” → 游戏内按 Enter。完成后 Enter 确认保存，Esc 放弃返回。“下载云端纠错题”和“上传成功示范”需要 GitHub CLI 已登录。完整的服务器发题、Windows 录制、Linux 收取与训练命令见 [跨平台工作流](docs/windows-capture.md)。
 
 ## Ubuntu 服务器准备
 
@@ -50,13 +59,13 @@ bash scripts/start_cloud.sh
 当前训练平台已确定为矩池云，先按[矩池云首次启动与验收](docs/matpool.md)确认镜像、网盘挂载和 GPU 图形能力。标准 Linux 镜像通常运行在容器中；能使用 CUDA 尚不能证明能渲染游戏，具体实例仍待实机检查。
 
 ```bash
-git clone https://github.com/wly-lizhong/valorant-agent-lab.git
+git clone -b windows-recorder https://github.com/wly-lizhong/valorant-agent-lab.git
 cd valorant-agent-lab
 bash scripts/setup_ubuntu.sh
 source .venv/bin/activate
 python scripts/assets.py install --archive assets/lotus-assets.zip \
-  --sha256 309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
-python scripts/bootstrap.py --maps-dir assets/maps-data --skip-build
+  --sha256 479c756ee440f91dbaad8f9da649c7f671a0b3271605d33159d96971706d0727
+python scripts/bootstrap.py --maps-dir assets/maps-data-v2.15.0 --skip-build
 bash scripts/setup_cloud.sh
 ```
 
@@ -91,7 +100,7 @@ valorant-lab record --episodes 2 --split validation
 
 窗口内按 Space 开始；WASD 移动、鼠标瞄准、左键开火、R 换弹、Shift 静步、Ctrl 蹲、Space 跳跃。回合成功后按 S 确认保存，R 重试；Esc 放弃当前示范。失败、失焦或未完成的记录不会自动成为正确示范。
 
-云端录制的数据可直接交给学习器；若在另一台合适机器采集，需复制整个 `runs/demonstrations/` 到训练实例，再执行：
+云端录制的数据可直接交给学习器；Windows 本机示范先用 `python -m valorant_lab.exchange pull --kind demos --directory runs/demonstrations` 导入，再执行：
 
 ```bash
 valorant-lab bc-train --data runs/demonstrations --device cuda
@@ -126,6 +135,7 @@ PPO 默认每 25,000 步做 3 个开发回合评估，并把代表性失败放�
 
 浏览器步进示范台已实现，原速视频串流与实际云端手感仍需后续验证。任意时刻场景快照、声音输入、图像目标导航、长期记忆、技能和外接键鼠仍未实现。完整官方客户端机制校准、模型量化和低配部署优化继续按后续阶段推进。
 
+- [Windows 本机采集与数据交换](docs/windows-capture.md)：原生选关、人工做题、GitHub 附件、Linux 导入、版本边界。
 - [第一阶段使用手册](docs/stage1-guide.md)：课程、录制、重放、BC/PPO、纠错、原速验收。
 - [云端工作流](docs/cloud-workflow.md)：低配开发端、无桌面 Linux、GPU 渲染与远程人工入口的分工及缺口。
 - [矩池云操作指南](docs/matpool.md)：持久化目录、实例图形验收、带平台端口的 SSH 隧道和换机恢复。

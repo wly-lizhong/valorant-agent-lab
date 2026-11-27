@@ -77,24 +77,11 @@ bash scripts/run_cloud.sh smoke
 
 保留 `local.json`、地图和 `runs/`。保存当前 Git SHA 以及 `pip freeze`，便于回到对应代码。不要在训练进程运行时切换代码。
 
-## Windows 调试
+## Windows 本机采集
 
-这一节是其他具备图形条件的 Windows 机器的可选路径。当前无 GPU 的开发电脑不需要完成以下游戏运行和录制步骤；可只安装轻量依赖、运行 Python 单元检查，通过 SSH/浏览器使用云端。
+推荐使用 [Windows 本机采集与 Linux 数据交换](windows-capture.md)：双击 `start_windows.cmd`，自动准备 Godot/.NET 和轻量 Python 依赖，中文选关后打开原生游戏。Windows 不安装训练用 CUDA/PyTorch；Linux 接收示范进行训练。
 
-需要 Python 3.10–3.12、[.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) 和可用的桌面显卡驱动。PowerShell 在仓库根目录运行：
-
-```powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\python -m pip install -r requirements.lock.txt
-.\.venv\Scripts\python -m pip install -e . --no-deps
-.\.venv\Scripts\python scripts/assets.py install --archive assets/lotus-assets.zip --sha256 309ae815598e3180e626eac0fbb693555abce65740e877fb3e40e0530d3746a2
-.\.venv\Scripts\python scripts/bootstrap.py --maps-dir assets/maps-data
-.\.venv\Scripts\python -m valorant_lab.cli smoke
-.\.venv\Scripts\python -m pip install -e '.[collect]'
-.\.venv\Scripts\python -m valorant_lab.cli record --scenario configs/lotus_route.json
-```
-
-训练依赖同上，用 `.\.venv\Scripts\python -m pip` 安装 CPU/CUDA wheel。Windows 和 WSL 使用各自 checkout 或重新生成 `local.json`；该文件的可执行文件和地图路径不能跨系统共用。当前真实引擎验收在 WSL Ubuntu 24.04 完成，原生 Windows 启动路径仍需单独实测。
+Windows 使用 `local.windows.json`，Linux 优先用 `local.linux.json`，没有时回退 `local.json`。路径不能跨系统共用；同一磁盘上的 Windows/WSL 应使用独立 checkout，避免覆盖 Godot/.NET 构建缓存。v2.15.0 原生 Windows 引擎与录制已执行验证，具体结果见[验证记录](validation.md)。
 
 ## 常见问题
 

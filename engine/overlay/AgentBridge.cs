@@ -11,6 +11,7 @@ namespace CaValAim.AgentLab;
 
 public partial class AgentBridge : Node
 {
+    const string EngineIdentity = "ca-val-aim-v2.15.0-lab-v3";
     record Request(JsonElement Data, TaskCompletionSource<string> Completion);
     readonly GameSession session;
     readonly AgentConfig config;
@@ -30,13 +31,15 @@ public partial class AgentBridge : Node
     MovementCombatMode? TaskMode => session.Mode as MovementCombatMode;
     float Distance => TaskMode?.Distance ?? session.PlayerFeet.DistanceTo(config.GoalPosition);
 
-    public AgentBridge(GameSession s, AgentConfig c, int port, string ready, bool real = false)
+    public AgentBridge(GameSession s, AgentConfig c, int port, string ready, bool real = false, string? human = null)
     {
         session = s; config = c; readyPath = ready; realtime = real; appliedAction = c.Noop;
+        humanDirectory = human;
         listener = new TcpListener(IPAddress.Loopback, port);
     }
     public override void _Ready()
     {
+        if (humanDirectory != null) { HumanSetup(); return; }
         listener.Start(1);
         File.WriteAllText(readyPath, JsonSerializer.Serialize(new {
             protocol = 1, revision = 2, port = ((IPEndPoint)listener.LocalEndpoint).Port,
@@ -125,6 +128,7 @@ public partial class AgentBridge : Node
     }
     public override void _Process(double delta)
     {
+        if (humanDirectory != null) { HumanProcess(); return; }
         if (realtime && running && !resetRequired)
         {
             double now = Clock;
@@ -166,17 +170,7 @@ public partial class AgentBridge : Node
             }
             if (command == "reset")
             {
-                running = false;
-                seed = data.TryGetProperty("seed", out var value) ? value.GetInt32() : 0;
-                session.AgentReset(config, seed);
-                steps = ticks = frameId = lastKills = lastHits = lastShots = lastMovingShots = lastWaypoint = watchdogReleases = 0;
-                resetRequired = terminated = truncated = success = false;
-                reason = "";
-                rewardPending = 0; rewards.Clear();
-                accumulator = droppedSeconds = 0;
-                startedWall = lastTickWall = lastInputWall = Clock;
-                appliedAction = config.Noop;
-                bestDistance = previousDistance = Distance;
+                ResetEpisode(data.TryGetProperty("seed", out var value) ? value.GetInt32() : 0);
             }
             else if (command == "step")
             {
@@ -204,26 +198,7 @@ public partial class AgentBridge : Node
             if (image == null || image.IsEmpty()) throw new InvalidOperationException("Renderer returned no pixels");
             image.Resize(config.Width, config.Height, Image.Interpolation.Bilinear);
             image.Convert(Image.Format.Rgb8);
-            double wall = Clock - startedWall;
-            var info = new {
-                scenario = config.Id, family = config.Family, map = config.Map, mode = config.Mode,
-                seed, step = steps, frame_id = frameId++, simulation_time = session.Now,
-                is_success = success, termination_reason = reason, distance_to_goal = previousDistance,
-                // These privileged diagnostics never enter observations or the BC data loader.
-                position = new[] { session.PlayerFeet.X, session.PlayerFeet.Y, session.PlayerFeet.Z },
-                yaw = session.View.Yaw, pitch = session.View.Pitch,
-                view_yaw = session.View.ViewYaw, view_pitch = session.View.ViewPitch,
-                speed = session.Mover.Speed, accurate = session.Mover.Accurate,
-                ammo = session.Gun?.Ammo ?? 0, hp = session.Player.Hp, shield = session.Player.Shield,
-                reloading = session.Gun?.Reloading ?? false,
-                shots = session.Mode.Shots, hits = session.Mode.Hits, kills = session.Mode.Kills,
-                moving_shots = TaskMode?.MovingShotCount ?? 0,
-                waypoint = TaskMode?.Waypoint ?? 0, enemies_spawned = TaskMode?.Spawned ?? 0,
-                reward_terms = new Dictionary<string, float>(rewards), action_applied = appliedAction,
-                clock = realtime ? "realtime" : "lockstep", wall_seconds = wall,
-                realtime_factor = wall > 0 ? session.Now / wall : 0,
-                dropped_seconds = droppedSeconds, watchdog_releases = watchdogReleases
-            };
+            var info = Info();
             request.Completion.TrySetResult(JsonSerializer.Serialize(new {
                 id, ok = true, protocol = 1, revision = 2, rgb = Convert.ToBase64String(image.GetData()),
                 width = config.Width, height = config.Height, reward = rewardPending, terminated, truncated, info
@@ -238,8 +213,44 @@ public partial class AgentBridge : Node
         }
         finally { busy = false; }
     }
+    void ResetEpisode(int newSeed)
+    {
+        running = false; seed = newSeed;
+        session.AgentReset(config, seed);
+        steps = ticks = frameId = lastKills = lastHits = lastShots = lastMovingShots = lastWaypoint = watchdogReleases = 0;
+        resetRequired = terminated = truncated = success = false;
+        reason = ""; rewardPending = 0; rewards.Clear();
+        accumulator = droppedSeconds = 0;
+        startedWall = lastTickWall = lastInputWall = Clock;
+        appliedAction = config.Noop;
+        bestDistance = previousDistance = Distance;
+    }
+    object Info()
+    {
+        double wall = Clock - startedWall;
+        return new {
+                scenario = config.Id, family = config.Family, map = config.Map, mode = config.Mode,
+                seed, step = steps, frame_id = frameId++, simulation_time = session.Now,
+                is_success = success, termination_reason = reason, distance_to_goal = previousDistance,
+                // These privileged diagnostics never enter observations or the BC data loader.
+                position = new[] { session.PlayerFeet.X, session.PlayerFeet.Y, session.PlayerFeet.Z },
+                yaw = session.View.Yaw, pitch = session.View.Pitch,
+                view_yaw = session.View.ViewYaw, view_pitch = session.View.ViewPitch,
+                speed = session.Mover.Speed, accurate = session.Mover.Accurate,
+                ammo = session.Gun?.Ammo ?? 0, hp = session.Player.Hp, shield = session.Player.Shield,
+                reloading = session.Gun?.Reloading ?? false,
+                shots = session.Mode.Shots, hits = session.Mode.Hits, kills = session.Mode.Kills,
+                moving_shots = TaskMode?.MovingShotCount ?? 0,
+                waypoint = TaskMode?.Waypoint ?? 0, enemies_spawned = TaskMode?.Spawned ?? 0,
+                reward_terms = new Dictionary<string, float>(rewards), action_applied = appliedAction.ToArray(),
+                clock = humanDirectory != null ? "native_fixed_step" : realtime ? "realtime" : "lockstep", wall_seconds = wall,
+                realtime_factor = wall > 0 ? session.Now / wall : 0,
+                dropped_seconds = droppedSeconds, watchdog_releases = watchdogReleases
+            };
+    }
     public override void _ExitTree()
     {
+        HumanClose();
         cancel.Cancel(); listener.Stop(); Mover.KeyOverride = null;
     }
 }

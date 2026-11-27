@@ -1,5 +1,6 @@
 from __future__ import annotations
 import base64
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -33,7 +34,26 @@ def validate_assets(asset_root: Path, map_key: str) -> dict:
         path = directory / (level + ".glb")
         if not path.is_file() or path.stat().st_size < 4096:
             raise FileNotFoundError(f"Missing/empty map geometry: {path}")
+    lock = json.loads((ROOT / "dependencies.lock.json").read_text(encoding="utf-8"))
+    pinned = lock.get("assets", {})
+    if pinned.get("map") == map_key:
+        for relative, expected in pinned["files"].items():
+            target = (asset_root / relative).resolve()
+            if not target.is_relative_to(asset_root.resolve()) or not target.is_file():
+                raise ValueError("Missing pinned map file: " + relative)
+            h = hashlib.sha256()
+            with target.open("rb") as stream:
+                for block in iter(lambda: stream.read(1024 * 1024), b""):
+                    h.update(block)
+            if h.hexdigest() != expected:
+                raise ValueError("Map version mismatch; install the current bundled assets: " + relative)
     return {"map": map_key, "levels": len(levels), "directory": str(directory)}
+
+
+def validate_runtime(local: dict):
+    expected = json.loads((ROOT / "dependencies.lock.json").read_text(encoding="utf-8"))["upstream"]["sha256"]
+    if local.get("upstream_sha256") != expected:
+        raise ValueError("Engine version changed; rerun bootstrap/start_windows with the current source and map bundle")
 
 
 class ValorantNavigationEnv(gym.Env):
@@ -76,9 +96,13 @@ class ValorantNavigationEnv(gym.Env):
 
     def _launch(self, startup_timeout: float) -> int:
         local_path = self.root / "local.json"
+        platform_config = self.root / ("local.windows.json" if os.name == "nt" else "local.linux.json")
+        if platform_config.is_file():
+            local_path = platform_config
         if not local_path.is_file():
             raise FileNotFoundError("Run python scripts/bootstrap.py first; local.json is missing")
-        local = json.loads(local_path.read_text())
+        local = json.loads(local_path.read_text(encoding="utf-8"))
+        validate_runtime(local)
         map_key = self.config["map"]
         if self.config.get("require_real_map", True):
             if not local.get("maps_dir"):

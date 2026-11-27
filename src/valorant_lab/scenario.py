@@ -80,7 +80,7 @@ def noop(c: dict) -> np.ndarray:
 def contract(c: dict) -> dict:
     # Enemy/start variants may differ within an explicitly shared task family.
     # Route, timing, pixels, HUD, map, weapon and action meanings must match.
-    return {"version": 2, "engine": "ca-val-aim-v2.11.0-lab-v2", "map": c["map"],
+    return {"version": 3, "engine": "ca-val-aim-v2.15.0-lab-v3", "map": c["map"],
             "mode": c.get("mode", "navigation"), "family": c.get("family", "navigation-selftest"),
             "task": c.get("task", "Reach the fixed destination."), "waypoints": c.get("waypoints", []), "goal": c["goal"],
             "shape": [c["height"], c["width"], 3], "stack": FRAME_STACK,
