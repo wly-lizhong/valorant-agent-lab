@@ -10,20 +10,22 @@ from .corrections import load_case
 from .exchange import pull, push, DEFAULT_REPO
 
 COURSES = [
-    ("路线行走", "lotus_route", "只走路：从 A Root 沿通道走向 A 入口，依次通过路线点。"),
+    ("路线行走", "lotus_route", "只走路：跟随旁边的路线示意图，从 A Root 走到绿色终点圈（A 入口训练区）。不用逐个踩中中途点。"),
     ("停稳射击", "lotus_shooting", "沿路线前进，停稳后处理可见敌人，再继续到入口。"),
     ("换弹与前进", "lotus_reload", "先换弹，再处理敌人并完成路线。"),
     ("调整视角", "lotus_recovery", "将视角恢复到正常高度，再完成路线。"),
     ("组合交战", "lotus_movement_combat", "移动、停稳射击、换弹并完成路线。"),
 ]
 ISSUES = {"window_lost_focus": "切换了窗口", "render_or_disk_too_slow": "本机出现明显卡顿",
+          "sustained_render_lag": "画面处理连续或严重延迟，已保留具体耗时日志",
           "writer_queue_full": "硬盘保存跟不上", "capture_failed": "获取画面失败",
+          "guide_failed": "路线引导窗口未能启动，请重新启动本关",
           "user_aborted": "主动放弃", "window_closed": "关闭了游戏窗口"}
 
 
 def main():
     root = tk.Tk(); root.title("Agent Lab · Windows 本机示范台")
-    root.geometry("840x600"); root.minsize(800, 580)
+    root.geometry("840x650"); root.minsize(800, 630)
     panel = ttk.Frame(root, padding=24); panel.pack(fill="both", expand=True)
     ttk.Label(panel, text="本机玩游戏，云端训练", font=("Microsoft YaHei", 20, "bold")).pack(anchor="w")
     ttk.Label(panel, text="选择课程或云端发来的纠错题。游戏、画面和按键全部在这台电脑运行。").pack(anchor="w", pady=10)
@@ -31,11 +33,13 @@ def main():
     picker.pack(fill="x", pady=8)
     hint = tk.StringVar(); ttk.Label(panel, textvariable=hint, wraplength=710).pack(anchor="w", pady=8)
     row = ttk.Frame(panel); row.pack(fill="x", pady=8)
-    ttk.Label(row, text="场景编号").pack(side="left")
+    ttk.Label(row, text="变化编号").pack(side="left")
     seed = tk.StringVar(value="42"); seed_input = ttk.Entry(row, textvariable=seed, width=9); seed_input.pack(side="left", padx=8)
     split = tk.StringVar(value="训练示范")
     split_box = ttk.Combobox(row, textvariable=split, values=["训练示范", "独立验证"], state="readonly", width=12)
     split_box.pack(side="left"); ttk.Label(row, text="验证集不用于学习；纠错题固定用于训练。").pack(side="left", padx=8)
+    ttk.Label(panel, text="当前是同一条 A Root → A 入口路线上的 5 种练习。编号只微调出生位置和朝向，\n不会更换地图或路线；“独立验证”使用另一组随机种子，不等于新增路线。",
+              wraplength=710).pack(anchor="w", pady=4)
     controls = ttk.Frame(panel); controls.pack(fill="x", pady=12)
     status = tk.StringVar(value="准备就绪。先选关，再点击开始。")
     ttk.Label(panel, textvariable=status, wraplength=710, foreground="#175b55").pack(anchor="w", pady=8)
@@ -51,6 +55,7 @@ def main():
     results = queue.Queue(); busy = False; items = []; buttons = []
 
     def refresh():
+        previous = selected.get()
         items.clear()
         for title, key, description in COURSES:
             items.append((title, ROOT / "configs" / (key + ".json"), None, description))
@@ -62,7 +67,9 @@ def main():
             if c.get("status") != "model_passed_once":
                 items.append(("纠错 · " + c["title"] + " · " + c["id"][:6], None, path,
                               c["note"] + " 需要完整重做，不是直接从卡住的一帧开始。"))
-        picker["values"] = [x[0] for x in items]; picker.current(0); describe()
+        titles = [x[0] for x in items]
+        picker["values"] = titles
+        picker.current(titles.index(previous) if previous in titles else 0); describe()
 
     def describe(*_):
         if picker.current() >= 0:
@@ -87,7 +94,7 @@ def main():
             number = int(seed.get())
             if not 0 <= number < 100000: raise ValueError()
         except ValueError:
-            messagebox.showerror("场景编号", "请输入 0 到 99999 之间的整数。"); return
+            messagebox.showerror("变化编号", "请输入 0 到 99999 之间的整数。"); return
         _, scenario, case, _ = items[picker.current()]
         chosen_split = "train" if case or split.get() == "训练示范" else "validation"
         def capture():

@@ -121,6 +121,7 @@ def test_actual_engine_renderer_is_verified(tmp_path, monkeypatch, vendor, devic
     def launch(command, **kw):
         path = Path(command[command.index("--agent-ready") + 1])
         path.write_text(json.dumps({"protocol": 1, "revision": 2, "scenario": config["id"],
+            "completion_rule": config["completion_rule"],
             "action_sizes": action_sizes(config).tolist(), "clock": "lockstep", "port": 12345,
             "render_vendor": vendor, "render_device": device}))
         return Process()

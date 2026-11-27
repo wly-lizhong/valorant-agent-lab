@@ -101,6 +101,9 @@ def main() -> None:
     for signature in ["public override void _Process(double delta)", "public override void _Input(InputEvent e)"]:
         anchor = signature + "\n    {"
         patch_once(main_file, anchor, anchor + "\n        if (AgentLabActive) return;")
+    # Focus notifications call ApplyFps even in --dev mode, whose default uncaps rendering.
+    anchor = "public void ApplyFps()\n    {"
+    patch_once(main_file, anchor, anchor + "\n        if (AgentLabActive) return;")
     game_file = project / "src" / "Game" / "GameSession.cs"
     anchor = "public override void _Process(double delta)\n    {"
     patch_once(game_file, anchor, anchor + "\n        if (AgentControlled && !agentTicking) return;")

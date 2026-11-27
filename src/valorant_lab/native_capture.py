@@ -30,6 +30,7 @@ def import_capture(job, output):
     if (manifest.get("schema") != "valorant-native-v1" or manifest.get("source") not in ("human", "script_test")
             or request.get("engine_contract") != contract(config)
             or manifest.get("engine") != contract(config)["engine"]
+            or manifest.get("completion_rule", "ordered_waypoints") != config.get("completion_rule", "ordered_waypoints")
             or manifest.get("engine_seed") != request["engine_seed"]
             or request["split"] not in ("train", "validation")
             or type(manifest.get("steps")) is not int or not 0 <= manifest["steps"] <= config["max_steps"]):
@@ -44,6 +45,8 @@ def import_capture(job, output):
                            split=request["split"], case_id=request.get("case_id"))
     writer.manifest.update(native_capture_id=capture_id, collection={"transport": "native_window_v1",
         "alignment": "rendered_pre_action_v1", "input": "scenario_action_bins", "physics_hz": 60})
+    if "performance" in manifest:
+        writer.manifest["collection"]["performance"] = manifest["performance"]
     try:
         frame_size = config["width"] * config["height"] * 3
         count = 0

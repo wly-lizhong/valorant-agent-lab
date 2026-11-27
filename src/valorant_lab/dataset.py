@@ -138,6 +138,18 @@ def validate_native_alignment(config, before, after, timing):
     duration = config["action_repeat"] / config["physics_hz"]
     delta = after.get("simulation_time", -1) - before.get("simulation_time", -1)
     recorded_duration = timing.get("simulation_dt", -1)
+    elapsed = timing.get("completed", -1) - timing.get("input_sampled", 0)
+    pause = timing.get("paused_seconds", 0)
+    if timing.get("pacing") == "bounded_pause_v1":
+        prior_loss, loss = before.get("dropped_seconds", -1), after.get("dropped_seconds", -1)
+        # A pause is only valid when the fixed-step engine explicitly discarded unsimulated
+        # wall time. Preserve the old wall-time bound for active execution, and cap total loss.
+        if (not all(np.isfinite(x) for x in (pause, prior_loss, loss, elapsed))
+                or not 0 <= pause <= .75 or not 0 <= prior_loss <= loss <= 2
+                or pause > loss - prior_loss + 1e-6 or pause > elapsed):
+            raise ValueError("Native pause accounting mismatch")
+    elif timing.get("pacing") is not None or pause != 0:
+        raise ValueError("Unrecognized native pause accounting")
     if (timing.get("alignment") != "rendered_pre_action_v1"
             or timing.get("clock") != "native_fixed_step"
             or before.get("clock") != "native_fixed_step"
@@ -146,7 +158,7 @@ def validate_native_alignment(config, before, after, timing):
             or after.get("step") != before.get("step", -2) + 1
             or not np.isfinite(delta) or abs(delta - duration) > .002
             or not np.isfinite(recorded_duration) or abs(recorded_duration - duration) > 1e-6
-            or not 0 <= timing.get("completed", -1) - timing.get("input_sampled", 0) <= .3):
+            or not 0 <= elapsed - pause <= .3):
         raise ValueError("Native pre-action frame/action timing mismatch")
 
 

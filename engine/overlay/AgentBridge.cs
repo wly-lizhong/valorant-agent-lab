@@ -45,6 +45,7 @@ public partial class AgentBridge : Node
             protocol = 1, revision = 2, port = ((IPEndPoint)listener.LocalEndpoint).Port,
             pid = System.Environment.ProcessId, scenario = config.Id, map = config.Map,
             action_sizes = config.ActionSizes, clock = realtime ? "realtime" : "lockstep",
+            completion_rule = config.CompletionRule,
             render_device = RenderingServer.GetVideoAdapterName(),
             render_vendor = RenderingServer.GetVideoAdapterVendor()
         }));

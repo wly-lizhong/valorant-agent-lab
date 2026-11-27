@@ -3,6 +3,7 @@
   "family": "lotus-a-root-entry-v1",
   "task": "Follow A Root toward the A entrance. Stop to engage visible enemies, reload as needed, then continue to the entrance.",
   "mode": "move_combat",
+  "completion_rule": "goal_and_targets",
   "map": "lotus",
   "start": [
     -18.0,

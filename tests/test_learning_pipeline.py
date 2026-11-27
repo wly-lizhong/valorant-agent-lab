@@ -100,8 +100,23 @@ def test_model_contract_rejects_semantic_changes(tmp_path, config):
     assert split_seed("train", 42) != split_seed("test", 42)
 
 
+def test_goal_rule_is_versioned_and_old_contract_stays_readable(tmp_path, config):
+    legacy = {**config}
+    legacy.pop("completion_rule")
+    assert "completion_rule" not in contract(legacy)
+    assert contract(legacy) == contract({**legacy, "completion_rule": "ordered_waypoints"})
+    write_episode(tmp_path, legacy)
+    with pytest.raises(ValueError, match="contract"):
+        load_episodes(tmp_path, config)
+    assert contract(config)["completion_rule"] == "goal_and_targets"
+    assert contract(config) != contract({**config, "goal_radius": 2})
+    for name in ("route", "shooting", "reload", "recovery"):
+        assert contract(load_scenario(ROOT / "configs" / f"lotus_{name}.json")) == contract(config)
+
+
 @pytest.mark.parametrize("field,value", [("yaw_bins", [-1, 1, 2]), ("start", [0, 1]),
-                                         ("goal_marker", True), ("player_hud", False)])
+                                         ("goal_marker", True), ("player_hud", False),
+                                         ("completion_rule", "accept_anywhere")])
 def test_invalid_task_configuration(tmp_path, config, field, value):
     path = tmp_path / "scenario.json"
     path.write_text(json.dumps({**config, field: value}))

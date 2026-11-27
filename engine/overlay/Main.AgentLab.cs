@@ -33,7 +33,7 @@ public partial class Main
             GetTree().Root.Title = "VALORANT Agent Lab";
             GetTree().Root.Size = new Vector2I(config.RenderWidth, config.RenderHeight);
             DisplayServer.WindowSetVsyncMode(DisplayServer.VSyncMode.Disabled);
-            Engine.MaxFps = 120;
+            Engine.MaxFps = CmdLine.Has("--agent-human") ? 60 : 120;
             var session = new GameSession(() => config.Mode == "move_combat"
                 ? new MovementCombatMode(config) : new NavigationMode(config))
                 { AgentControlled = true, WarmupSession = true };

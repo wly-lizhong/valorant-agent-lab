@@ -100,6 +100,7 @@ def native_job(tmp_path,cfg):
     (raw/'steps.jsonl').write_text(json.dumps(row)+'\n')
     with gzip.open(raw/'frame-000000.rgb.gz','wb') as f:f.write(bytes(cfg['width']*cfg['height']*3))
     write_json(raw/'native.json',{'schema':'valorant-native-v1','engine':contract(cfg)['engine'],'source':'human','engine_seed':42,'steps':1,
+                                'completion_rule':cfg.get('completion_rule','ordered_waypoints'),
                                 'final':{'is_success':True},'accepted':True,'complete':True,'quality_issues':[]})
     return job,row
 
@@ -112,6 +113,47 @@ def test_native_conversion_preserves_alignment_and_is_idempotent(tmp_path,cfg):
     [(directory,m)]=load_episodes(target,cfg)
     assert m['collection']['alignment']=='rendered_pre_action_v1'
     with np.load(directory/m['chunks'][0]['file']) as z: assert z['frames'].shape==(1,144,256,3)
+
+
+def test_new_goal_task_rejects_capture_from_old_engine(tmp_path, cfg):
+    job, _ = native_job(tmp_path, cfg)
+    path = job / 'capture/native.json'
+    manifest = json.loads(path.read_text())
+    manifest.pop('completion_rule')
+    write_json(path, manifest)
+    with pytest.raises(ValueError, match='manifest'):
+        import_capture(job, tmp_path / 'demos')
+
+
+def test_native_bounded_pause_keeps_actual_action_alignment(tmp_path, cfg):
+    job, row = native_job(tmp_path, cfg)
+    row['before']['dropped_seconds'] = .4  # Earlier capture pause, before input was sampled.
+    row['after']['dropped_seconds'] = .75
+    row['timing'].update(pacing='bounded_pause_v1', paused_seconds=.35, completed=1.40)
+    (job/'capture/steps.jsonl').write_text(json.dumps(row)+'\n')
+    result = import_capture(job, tmp_path/'demos')
+    assert json.loads((result/'episode.json').read_text())['accepted']
+
+
+@pytest.mark.parametrize('error', ['unaccounted', 'negative', 'nonfinite', 'too_long',
+                                 'total_loss', 'active_lag', 'unknown_pacing', 'backward_clock'])
+def test_native_pause_cannot_hide_invalid_timing(tmp_path, cfg, error):
+    job, row = native_job(tmp_path, cfg)
+    row['before']['dropped_seconds'] = 0
+    row['after']['dropped_seconds'] = .35
+    row['timing'].update(pacing='bounded_pause_v1', paused_seconds=.35, completed=1.4)
+    if error == 'unaccounted': row['after']['dropped_seconds'] = 0
+    if error == 'negative': row['timing']['paused_seconds'] = -.1
+    if error == 'nonfinite': row['timing']['paused_seconds'] = float('nan')
+    if error == 'too_long': row['timing'].update(paused_seconds=.9, completed=1.95)
+    if error == 'total_loss': row['after']['dropped_seconds'] = 2.1
+    if error == 'active_lag': row['timing']['completed'] = 1.9
+    if error == 'unknown_pacing': row['timing'].pop('pacing')
+    if error == 'backward_clock': row['timing']['completed'] = .9
+    (job/'capture/steps.jsonl').write_text(json.dumps(row)+'\n')
+    with pytest.raises(ValueError, match='pause|timing'):
+        import_capture(job, tmp_path/'demos')
+    assert not load_episodes(tmp_path/'demos', cfg)
 
 
 @pytest.mark.parametrize('error',['time','nonfinite_time','clock','action','pixels'])

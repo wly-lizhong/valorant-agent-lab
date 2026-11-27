@@ -141,6 +141,8 @@ class ValorantNavigationEnv(gym.Env):
                         raise RuntimeError("Engine overlay is outdated; rerun scripts/bootstrap.py")
                     if data.get("clock") != ("realtime" if self.realtime else "lockstep"):
                         raise RuntimeError("Engine clock mismatch")
+                    if data.get("completion_rule", "ordered_waypoints") != self.config.get("completion_rule", "ordered_waypoints"):
+                        raise RuntimeError("Engine completion rule is outdated; rerun scripts/bootstrap.py")
                     self.engine_metadata = {k: data.get(k) for k in ("revision", "render_device", "render_vendor", "clock")}
                     if os.environ.get("VALORANT_LAB_GPU_REQUIRED") == "1":
                         from .cloud import SOFTWARE

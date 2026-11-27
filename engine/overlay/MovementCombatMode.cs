@@ -18,7 +18,9 @@ public sealed class MovementCombatMode : MovementMode
     public int MovingShotCount => MovingShots;
     public int Waypoint { get; private set; }
     public bool RouteComplete => Waypoint >= config.Waypoints.Length;
-    public bool Success => RouteComplete && Kills == Spawned && Distance <= config.GoalRadius;
+    public float GoalDistance => ((GameSession)G).PlayerFeet.DistanceTo(config.GoalPosition);
+    public bool Success => Kills == Spawned && (config.CompletionRule == "goal_and_targets"
+        ? GoalDistance <= config.GoalRadius : RouteComplete && Distance <= config.GoalRadius);
     public float Distance => ((GameSession)G).PlayerFeet.DistanceTo(Target);
     public Vector3 Target => Point(config.Waypoints[Math.Min(Waypoint, config.Waypoints.Length - 1)]);
     static Vector3 Point(float[] p) => new(p[0], p[1], p[2]);
@@ -78,7 +80,16 @@ public sealed class MovementCombatMode : MovementMode
             b.Brain.Update(G, dt);
             b.Body._Process(dt);
         }
-        if (!G.Player.Dead && !RouteComplete && Distance <= config.GoalRadius) Waypoint++;
+        if (G.Player.Dead || RouteComplete) return;
+        if (config.CompletionRule == "goal_and_targets")
+        {
+            // These points guide/shape progress, not hidden gates. Natural corner cutting
+            // may miss an earlier circle; reaching a later point must not send a human back.
+            for (int i = config.Waypoints.Length - 1; i >= Waypoint; i--)
+                if (((GameSession)G).PlayerFeet.DistanceTo(Point(config.Waypoints[i])) <= config.GoalRadius)
+                { Waypoint = i + 1; break; }
+        }
+        else if (Distance <= config.GoalRadius) Waypoint++;
     }
     public override void OnPlayerDied() => Deaths++;
     public override float OnBullet(Vector3 o, Vector3 d, bool accurate)

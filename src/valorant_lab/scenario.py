@@ -33,6 +33,8 @@ def validate_scenario(c: dict) -> None:
             raise ValueError(f"Missing scenario {key}")
     if c.get("mode", "navigation") not in ("navigation", "move_combat"):
         raise ValueError("Unknown scenario mode")
+    if c.get("completion_rule", "ordered_waypoints") not in ("ordered_waypoints", "goal_and_targets"):
+        raise ValueError("Unknown completion_rule")
     if not all(point(c.get(k)) for k in ("start", "goal")):
         raise ValueError("start and goal must be finite 3D coordinates")
     for key, default in (("yaw_bins", LEGACY_YAW), ("pitch_bins", LEGACY_PITCH)):
@@ -80,7 +82,7 @@ def noop(c: dict) -> np.ndarray:
 def contract(c: dict) -> dict:
     # Enemy/start variants may differ within an explicitly shared task family.
     # Route, timing, pixels, HUD, map, weapon and action meanings must match.
-    return {"version": 3, "engine": "ca-val-aim-v2.15.0-lab-v3", "map": c["map"],
+    result = {"version": 3, "engine": "ca-val-aim-v2.15.0-lab-v3", "map": c["map"],
             "mode": c.get("mode", "navigation"), "family": c.get("family", "navigation-selftest"),
             "task": c.get("task", "Reach the fixed destination."), "waypoints": c.get("waypoints", []), "goal": c["goal"],
             "shape": [c["height"], c["width"], 3], "stack": FRAME_STACK,
@@ -88,6 +90,10 @@ def contract(c: dict) -> dict:
             "yaw_bins": c.get("yaw_bins", LEGACY_YAW), "pitch_bins": c.get("pitch_bins", LEGACY_PITCH),
             "action_sizes": action_sizes(c).tolist(), "player_hud": c.get("player_hud", False),
             "goal_marker": c.get("goal_marker", True), "weapon": "Vandal"}
+    # Keep legacy contracts readable, but never silently mix the changed success rule.
+    if c.get("completion_rule", "ordered_waypoints") != "ordered_waypoints":
+        result.update(completion_rule=c["completion_rule"], goal_radius=c.get("goal_radius", .8))
+    return result
 
 
 def model_metadata_path(model: str | Path) -> Path:

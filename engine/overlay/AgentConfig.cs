@@ -10,6 +10,7 @@ public sealed class AgentConfig
     public string Mode { get; set; } = "navigation";
     public string Family { get; set; } = "navigation-selftest";
     public string Task { get; set; } = "Reach the fixed destination.";
+    public string CompletionRule { get; set; } = "ordered_waypoints";
     public float[] Start { get; set; } = new float[] { -18, 0, 30.5f };
     public float StartYaw { get; set; } = 10.6f;
     public float[] Goal { get; set; } = new float[] { -17.26f, 0, 26.57f };
@@ -62,7 +63,9 @@ public sealed class AgentConfig
         bool GoodBins(float[] b) => b.Length >= 3 && b.Length <= 31 && b.Count(x => x == 0) == 1
             && b.All(x => float.IsFinite(x) && Math.Abs(x) <= 45)
             && b.Zip(b.Skip(1), (a, z) => a < z).All(x => x);
-        if (c.Mode is not ("navigation" or "move_combat") || !GoodBins(c.YawBins) || !GoodBins(c.PitchBins)
+        if (c.Mode is not ("navigation" or "move_combat")
+            || c.CompletionRule is not ("ordered_waypoints" or "goal_and_targets")
+            || !GoodBins(c.YawBins) || !GoodBins(c.PitchBins)
             || !float.IsFinite(c.StartPitch) || Math.Abs(c.StartPitch) > 85
             || !float.IsFinite(c.StartJitter) || c.StartJitter < 0 || c.StartJitter > 2
             || c.Waypoints.Length > 32 || c.Enemies.Length > 8
