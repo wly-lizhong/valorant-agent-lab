@@ -19,6 +19,8 @@ public sealed class AgentConfig
     public float StartPitch { get; set; }
     public float StartJitter { get; set; }
     public float[][] Waypoints { get; set; } = Array.Empty<float[]>();
+    // Teacher window only. Never changes engine progress, rewards, success or policy RGB.
+    public int TeacherWaypointStart { get; set; }
     public float[][] Enemies { get; set; } = Array.Empty<float[]>();
     public float EnemyProbability { get; set; } = 1;
     public bool EnemyFire { get; set; } = true;
@@ -69,6 +71,8 @@ public sealed class AgentConfig
             || !float.IsFinite(c.StartPitch) || Math.Abs(c.StartPitch) > 85
             || !float.IsFinite(c.StartJitter) || c.StartJitter < 0 || c.StartJitter > 2
             || c.Waypoints.Length > 32 || c.Enemies.Length > 8
+            || c.TeacherWaypointStart < 0 || c.TeacherWaypointStart > c.Waypoints.Length
+            || (c.CompletionRule == "ordered_waypoints" && c.TeacherWaypointStart != 0)
             || !c.Waypoints.All(GoodPoint) || !c.Enemies.All(GoodPoint)
             || !float.IsFinite(c.EnemyProbability) || c.EnemyProbability < 0 || c.EnemyProbability > 1
             || c.EnemyTier < 0 || c.EnemyTier > 4 || c.InitialAmmo < 0 || c.InitialAmmo > 25)

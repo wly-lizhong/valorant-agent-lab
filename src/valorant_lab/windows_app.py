@@ -12,6 +12,8 @@ from .exchange import pull, push, DEFAULT_REPO
 COURSES = [
     ("路线行走", "lotus_route", "只走路：跟随旁边的路线示意图，从 A Root 走到绿色终点圈（A 入口训练区）。不用逐个踩中中途点。"),
     ("停稳射击", "lotus_shooting", "沿路线前进，停稳后处理可见敌人，再继续到入口。"),
+    ("补录 · 近距有敌", "lotus_close_engagement", "从路线中段开始，敌人在前方约 3 米。先向前走一小步，松开移动键、停稳瞄准击杀，再继续到绿色终点圈；不用回头补前面的路线点。训练编号 62–65，独立验证 162–163。"),
+    ("补录 · 近距无人", "lotus_close_clear", "与“近距有敌”从同一位置开始，但没有敌人。确认前方无人后直接沿通道前进，不开枪，走到绿色终点圈。训练编号 62–65，独立验证 162–163。"),
     ("换弹与前进", "lotus_reload", "先换弹，再处理敌人并完成路线。"),
     ("调整视角", "lotus_recovery", "将视角恢复到正常高度，再完成路线。"),
     ("组合交战", "lotus_movement_combat", "移动、停稳射击、换弹并完成路线。"),
@@ -38,7 +40,7 @@ def main():
     split = tk.StringVar(value="训练示范")
     split_box = ttk.Combobox(row, textvariable=split, values=["训练示范", "独立验证"], state="readonly", width=12)
     split_box.pack(side="left"); ttk.Label(row, text="验证集不用于学习；纠错题固定用于训练。").pack(side="left", padx=8)
-    ttk.Label(panel, text="当前是同一条 A Root → A 入口路线上的 5 种练习。编号只微调出生位置和朝向，\n不会更换地图或路线；“独立验证”使用另一组随机种子，不等于新增路线。",
+    ttk.Label(panel, text="练习位于同一条 A Root → A 入口路线；近距补录从中段开始。编号微调出生位置和朝向，\n不会更换地图；“独立验证”使用另一组随机种子，不等于新增路线。",
               wraplength=710).pack(anchor="w", pady=4)
     controls = ttk.Frame(panel); controls.pack(fill="x", pady=12)
     status = tk.StringVar(value="准备就绪。先选关，再点击开始。")

@@ -19,7 +19,7 @@ public partial class HumanRouteGuide : Control
     public HumanRouteGuide(AgentConfig c, Font f)
     {
         config = c; font = f; MouseFilter = MouseFilterEnum.Ignore;
-        route = new[] { c.StartPosition }.Concat(c.Waypoints.Select(p => new Vector3(p[0], p[1], p[2])))
+        route = new[] { c.StartPosition }.Concat(c.Waypoints.Skip(c.TeacherWaypointStart).Select(p => new Vector3(p[0], p[1], p[2])))
             .Append(c.GoalPosition).Select(p => new Vector2(p.X, p.Z)).ToArray();
         minimum = new Vector2(route.Min(p => p.X) - 3, route.Min(p => p.Y) - 3);
         maximum = new Vector2(route.Max(p => p.X) + 3, route.Max(p => p.Y) + 3);
@@ -27,7 +27,8 @@ public partial class HumanRouteGuide : Control
 
     public void Refresh(Vector3 position, float heading, int next, float remaining, string status, bool completed)
     {
-        feet = position; yaw = heading; waypoint = next; seconds = remaining; state = status; success = completed;
+        feet = position; yaw = heading; waypoint = Math.Max(next, config.TeacherWaypointStart);
+        seconds = remaining; state = status; success = completed;
         goalDistance = feet.DistanceTo(config.GoalPosition);
         QueueRedraw();
     }
@@ -48,9 +49,9 @@ public partial class HumanRouteGuide : Control
         Text("路线示意（不显示地图墙体）", 16, 84, Muted, 15);
         DrawRect(new Rect2(14, 96, 292, 256), new Color("172b39"));
         for (int i = 1; i < route.Length; i++) DrawLine(Map(route[i - 1]), Map(route[i]), Blue, 4, true);
-        for (int i = 0; i < config.Waypoints.Length - 1; i++)
+        for (int i = config.TeacherWaypointStart; i < config.Waypoints.Length - 1; i++)
         {
-            var p = Map(route[i + 1]);
+            var p = Map(route[i - config.TeacherWaypointStart + 1]);
             DrawCircle(p, 5, i < waypoint ? Muted : Blue);
             Text((i + 1).ToString(), p.X + 10, p.Y + 5, Muted, 13);
         }

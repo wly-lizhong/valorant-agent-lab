@@ -64,6 +64,10 @@ def validate_scenario(c: dict) -> None:
     for key, default, hi in (("enemy_tier", 0, 4), ("initial_ammo", 25, 25)):
         if type(c.get(key, default)) is not int or not 0 <= c.get(key, default) <= hi:
             raise ValueError(f"Invalid {key}")
+    guide_start = c.get("teacher_waypoint_start", 0)
+    if (type(guide_start) is not int or not 0 <= guide_start <= len(c.get("waypoints", []))
+            or (c.get("completion_rule", "ordered_waypoints") == "ordered_waypoints" and guide_start != 0)):
+        raise ValueError("Invalid teacher_waypoint_start")
     if c.get("mode") == "move_combat":
         if c.get("goal_marker", True) or not c.get("player_hud") or not c.get("waypoints") or not c.get("family"):
             raise ValueError("move_combat needs unmarked waypoints, family and player_hud")
