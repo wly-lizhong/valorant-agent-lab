@@ -189,7 +189,10 @@ def main():
     evaluation.add_argument("--model", required=True)
     evaluation.add_argument("--episodes", type=int, default=10)
     evaluation.add_argument("--device", default="auto")
-    evaluation.add_argument("--cpu-threads", type=int, default=4)
+    evaluation.add_argument("--cpu-threads", type=int, default=4,
+                            help="PyTorch CPU thread budget shared across evaluation workers")
+    evaluation.add_argument("--workers", type=int, default=1,
+                            help="Independent lockstep game processes; realtime/case evaluation stays serial")
     evaluation.add_argument("--output", default="runs/evaluation")
     evaluation.add_argument("--split", choices=["dev", "validation", "test"], default="dev")
     evaluation.add_argument("--queue", help="Deduplicated correction queue; development split only")
@@ -219,6 +222,20 @@ def main():
     bc.add_argument("--cpu-threads", type=int, default=4)
     bc.add_argument("--learning-rate", type=float, default=3e-4)
     bc.add_argument("--device", default="auto")
+    bc.add_argument("--precision", choices=["fp32", "amp-fp16"], default="fp32",
+                    help="Optional CUDA mixed precision; validation and saved parameters remain FP32")
+    bc.add_argument("--data-cache", choices=["auto", "cpu", "cuda", "stream"], default="auto",
+                    help="Decode once within budget; auto prefers CUDA, then CPU, then bounded streaming")
+    bc.add_argument("--cache-mib", type=int, default=1024,
+                    help="Total decoded train+validation cache budget in MiB (default: 1024)")
+    bc.add_argument("--checkpoint-every-epochs", type=int, default=1,
+                    help="Persist latest and best every N epochs, plus first/final; validate every epoch")
+    bc.add_argument("--policy-variant", choices=["legacy", "normalized", "normalized-relu"], default="legacy",
+                    help="Opt-in normalized visual features; legacy saved policies remain compatible")
+    bc.add_argument("--class-balance", choices=["none", "sqrt"], default="none",
+                    help="Train-only bounded inverse-square-root class weights; retain negative examples")
+    bc.add_argument("--class-weight-cap", type=float, default=8., help="Maximum rare/majority class weight ratio")
+    bc.add_argument("--resume", action="store_true", help="Resume the last complete BC checkpoint in --output")
     bc.add_argument("--allow-test-data", action="store_true", help="Pipeline checks only; marks model test_only")
     bc.set_defaults(func=bc_train)
     questions = commands.add_parser("queue", help="列出系统生成的人工纠错任务")
@@ -249,7 +266,7 @@ def main():
                          help="Scenario JSON; smoke defaults to navigation self-test, other commands to movement/combat")
         sub.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every", "epochs", "eval_episodes"):
+    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every", "epochs", "eval_episodes", "cache_mib", "checkpoint_every_epochs", "workers"):
         if hasattr(args, name) and getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.command == "train" and args.rollout * args.envs < args.batch_size:

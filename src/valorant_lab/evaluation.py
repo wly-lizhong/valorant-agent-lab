@@ -19,6 +19,9 @@ def stack_frame(history, frame):
 
 
 def evaluate(args):
+    if getattr(args, "workers", 1) > 1:
+        from .evaluation_parallel import evaluate_parallel
+        return evaluate_parallel(args)
     import torch
     from stable_baselines3 import PPO
     torch.set_num_threads(args.cpu_threads)

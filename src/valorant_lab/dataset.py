@@ -162,6 +162,19 @@ def validate_native_alignment(config, before, after, timing):
         raise ValueError("Native pre-action frame/action timing mismatch")
 
 
+def read_demonstration_chunk(path, metadata, chunk):
+    """Decode and validate a chunk identically for streaming and cached training."""
+    with np.load(path / metadata["chunks"][chunk]["file"], allow_pickle=False) as z:
+        frames, actions = z["frames"], z["actions"]
+    count = metadata["chunks"][chunk]["steps"]
+    c = metadata["contract"]
+    if (frames.dtype != np.uint8 or frames.shape != (count, *c["shape"])
+            or actions.shape != (count, 8) or actions.dtype.kind not in "iu"
+            or np.any(actions < 0) or np.any(actions >= c["action_sizes"])):
+        raise ValueError("Invalid demonstration tensor contents")
+    return frames, actions
+
+
 class DemonstrationDataset:
     """Map-style dataset; only pixels/actions are read. Bounded chunk cache, no full-dataset RAM load."""
     def __init__(self, episodes: list[tuple[Path, dict]]):
@@ -180,14 +193,7 @@ class DemonstrationDataset:
         offset = index - (int(ends[chunk - 1]) if chunk else 0)
         key = (episode, chunk)
         if key not in self.cache:
-            with np.load(path / metadata["chunks"][chunk]["file"], allow_pickle=False) as z:
-                frames, actions = z["frames"], z["actions"]
-            count = metadata["chunks"][chunk]["steps"]
-            c = metadata["contract"]
-            if (frames.dtype != np.uint8 or frames.shape != (count, *c["shape"])
-                    or actions.shape != (count, 8) or actions.dtype.kind not in "iu"
-                    or np.any(actions < 0) or np.any(actions >= c["action_sizes"])):
-                raise ValueError("Invalid demonstration tensor contents")
+            frames, actions = read_demonstration_chunk(path, metadata, chunk)
             self.cache[key] = (frames, actions)
             if len(self.cache) > 3:
                 self.cache.popitem(last=False)
