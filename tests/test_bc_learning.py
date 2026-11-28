@@ -113,7 +113,7 @@ def test_normalization_controls_feature_scale_and_legacy_loads(sample_data):
     config, _, _ = sample_data
     torch.set_num_threads(1)
     images = torch.randint(0, 256, (3, 12, 64, 64), dtype=torch.uint8)
-    for variant in ("legacy", "normalized", "normalized-relu"):
+    for variant in ("legacy", "normalized", "normalized-relu", "normalized-dropout", "spatial-dropout"):
         model = PPO("CnnPolicy", learning.OfflineSpaces(config), n_steps=2, batch_size=2,
                     policy_kwargs=learning.policy_kwargs(variant), device="cpu", seed=42)
         with torch.no_grad():
@@ -132,13 +132,15 @@ def test_normalization_controls_feature_scale_and_legacy_loads(sample_data):
         model.get_env().close()
 
 
-def test_resume_matches_uninterrupted_parameters_and_optimizer(tmp_path, sample_data):
+@pytest.mark.parametrize("idle_policy,variant", [("keep", "normalized"), ("skip", "normalized"),
+                         ("skip", "normalized-dropout"), ("skip", "spatial-dropout")])
+def test_resume_matches_uninterrupted_parameters_and_optimizer(tmp_path, sample_data, idle_policy, variant):
     _, scenario, _ = sample_data
     uninterrupted = tmp_path / "full"
     resumed = tmp_path / "resumed"
-    learning.bc_train(arguments(tmp_path, scenario, uninterrupted))
-    learning.bc_train(arguments(tmp_path, scenario, resumed, epochs=1))
-    learning.bc_train(arguments(tmp_path, scenario, resumed, resume=True))
+    learning.bc_train(arguments(tmp_path, scenario, uninterrupted, initial_idle_policy=idle_policy, policy_variant=variant))
+    learning.bc_train(arguments(tmp_path, scenario, resumed, epochs=1, initial_idle_policy=idle_policy, policy_variant=variant))
+    learning.bc_train(arguments(tmp_path, scenario, resumed, resume=True, initial_idle_policy=idle_policy, policy_variant=variant))
     left = PPO.load(uninterrupted / "latest.zip", device="cpu")
     right = PPO.load(resumed / "latest.zip", device="cpu")
     for name, tensor in left.policy.state_dict().items():
@@ -155,6 +157,271 @@ def test_resume_matches_uninterrupted_parameters_and_optimizer(tmp_path, sample_
         learning.bc_train(arguments(tmp_path, scenario, resumed))
     with pytest.raises(ValueError, match="fingerprint mismatch"):
         learning.bc_train(arguments(tmp_path, scenario, resumed, resume=True, class_balance="none"))
+    with pytest.raises(ValueError, match="fingerprint mismatch"):
+        learning.bc_train(arguments(tmp_path, scenario, resumed, resume=True,
+                                    initial_idle_policy="skip" if idle_policy == "keep" else "keep"))
+
+
+@pytest.mark.parametrize("variant", ["normalized-dropout", "spatial-dropout"])
+def test_regularized_policy_is_visual_and_deterministic_at_inference(sample_data, variant):
+    config, _, _ = sample_data
+    model = PPO("CnnPolicy", learning.OfflineSpaces(config), n_steps=2, batch_size=2,
+                policy_kwargs=learning.policy_kwargs(variant), device="cpu", seed=42)
+    images = torch.randint(0, 256, (3, 12, 64, 64), dtype=torch.uint8)
+    model.policy.set_training_mode(False)
+    with torch.no_grad():
+        first = model.policy.get_distribution(images).distribution[3].probs.clone()
+        repeat = model.policy.get_distribution(images).distribution[3].probs.clone()
+        blank = model.policy.get_distribution(torch.zeros_like(images)).distribution[3].probs.clone()
+    assert torch.equal(first, repeat)
+    assert not torch.equal(first, blank)
+    model.policy.set_training_mode(True)
+    features = model.policy.extract_features(images)
+    assert not torch.equal(features, model.policy.extract_features(images))
+    loss = -model.policy.get_distribution(images).log_prob(torch.as_tensor(np.tile(noop(config), (3, 1)))).mean()
+    loss.backward()
+    gradient = model.policy.features_extractor.network[0].weight.grad
+    assert gradient is not None and bool(torch.isfinite(gradient).all()) and bool((gradient != 0).any())
+    model.get_env().close()
+
+
+@pytest.mark.parametrize("variant", ["legacy", "normalized", "normalized-relu", "spatial-dropout"])
+def test_ppo_initialization_preserves_bc_architecture_and_eval_probabilities(tmp_path, sample_data, variant):
+    config, _, _ = sample_data
+    teacher = PPO("CnnPolicy", learning.OfflineSpaces(config), n_steps=2, batch_size=2,
+                  policy_kwargs=learning.policy_kwargs(variant), device="cpu", seed=42)
+    # Non-default weights prove this transfers the fitted policy, not just its shape.
+    with torch.no_grad():
+        teacher.policy.action_net.bias.add_(torch.arange(teacher.policy.action_net.out_features) * .01)
+    teacher.save(tmp_path / "bc.zip")
+    model = learning.initialize_ppo_from_bc(learning.OfflineSpaces(config), tmp_path / "bc.zip",
+        n_steps=8, batch_size=4, device="cpu", learning_rate=3e-5, seed=123, target_kl=.02)
+    images = torch.randint(0, 256, (2, 12, 64, 64), dtype=torch.uint8)
+    teacher.policy.set_training_mode(False)
+    model.policy.set_training_mode(True)
+    with torch.no_grad():
+        expected = teacher.policy.get_distribution(images).distribution
+        actual = model.policy.get_distribution(images).distribution
+        assert all(torch.equal(a.probs, b.probs) for a, b in zip(expected, actual))
+    assert model.n_steps == 8 and model.batch_size == 4
+    assert not model.policy.optimizer.state
+    assert not any(isinstance(m, torch.nn.Dropout) and m.p for m in model.policy.modules())
+    model.save(tmp_path / "ppo.zip")
+    loaded = PPO.load(tmp_path / "ppo.zip", device="cpu")
+    assert not any(isinstance(m, torch.nn.Dropout) and m.p for m in loaded.policy.modules())
+    teacher.get_env().close()
+    model.get_env().close()
+
+
+@pytest.mark.parametrize("rehearsal", [False, True])
+def test_ppo_cli_records_real_terminal_events_and_restores_signal_handler(tmp_path, sample_data, monkeypatch, rehearsal):
+    import gymnasium as gym
+    import signal
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    from valorant_lab import cli
+    config, scenario, _ = sample_data
+    spaces = learning.OfflineSpaces(config)
+    class FixtureEnv(gym.Env):
+        observation_space, action_space = spaces.observation_space, spaces.action_space
+        def reset(self, *, seed=None, options=None):
+            super().reset(seed=seed)
+            self.steps = 0
+            return np.zeros(self.observation_space.shape, np.uint8), {}
+        def step(self, action):
+            self.steps += 1
+            return np.zeros(self.observation_space.shape, np.uint8), 0., False, self.steps == 2, {
+                "seed": 42, "is_success": False, "termination_reason": "fixture",
+                "shots": 0, "hits": 0, "kills": 0, "moving_shots": 0, "simulation_time": .1}
+    teacher = PPO("CnnPolicy", spaces, n_steps=2, batch_size=2,
+                  policy_kwargs=learning.policy_kwargs("spatial-dropout"), device="cpu")
+    checkpoint = tmp_path / "teacher.zip"
+    learning.save_model(teacher, checkpoint, learning.metadata(config, "bc", test_only=True,
+                       policy_variant="spatial-dropout", episodes=[]))
+    monkeypatch.setattr(cli, "make_vector_env", lambda *unused: DummyVecEnv([FixtureEnv]))
+    args = SimpleNamespace(cpu_threads=1, output=str(tmp_path/'ppo'), scenario=str(scenario),
+        resume=None, init_bc=str(checkpoint), learning_rate=3e-5, entropy_coef=.002, target_kl=.02,
+        seed=42, device="cpu", envs=1, steps=8, rollout=4, batch_size=4,
+        checkpoint_every=4, eval_every=0, eval_episodes=1)
+    if rehearsal:
+        args.rehearsal_data = str(tmp_path / "data")
+        args.separate_critic = True
+    previous = signal.getsignal(signal.SIGTERM)
+    cli.train(args)
+    assert signal.getsignal(signal.SIGTERM) is previous
+    meta = json.loads((tmp_path/'ppo/latest.json').read_text())
+    assert meta['num_timesteps'] == 8 and meta['test_only'] is True
+    rows = [json.loads(s) for s in (tmp_path/'ppo/training-episodes.jsonl').read_text().splitlines()]
+    assert len(rows) == 4 and all(x['seed'] == 42 and x['shots'] == 0 for x in rows)
+    assert meta['feature_dropout_disabled'] is True
+    if rehearsal:
+        assert meta['separate_critic'] is True
+        assert meta['rehearsal']['completed_updates'] == 8
+        assert meta['rehearsal']['samples'] == 7
+        args.resume, args.init_bc = str(tmp_path/'ppo/latest.zip'), None
+        args.output, args.steps = str(tmp_path/'continued'), 4
+        cli.train(args)
+        continued = json.loads((tmp_path/'continued/latest.json').read_text())
+        assert continued['num_timesteps'] == 12
+        assert continued['rehearsal']['completed_updates'] == 12
+        # Inference needs neither demonstration files nor a special evaluation path.
+        loaded = PPO.load(tmp_path/'continued/latest.zip', device='cpu')
+        assert loaded.predict(np.zeros((12, 64, 64), np.uint8), deterministic=True)[0].shape == (8,)
+    teacher.get_env().close()
+
+
+@pytest.mark.parametrize("override", [False, True])
+def test_ppo_resume_honors_seed_and_preserves_optimizer_and_hyperparameters(tmp_path, sample_data, monkeypatch, override):
+    import gymnasium as gym
+    from stable_baselines3.common.vec_env import DummyVecEnv
+    from valorant_lab import cli
+    config, scenario, _ = sample_data
+    spaces = learning.OfflineSpaces(config)
+    seen_seeds = []
+
+    class SeedEnv(gym.Env):
+        observation_space, action_space = spaces.observation_space, spaces.action_space
+
+        def reset(self, *, seed=None, options=None):
+            super().reset(seed=seed)
+            seen_seeds.append(seed)
+            self.steps = 0
+            self.engine_seed = int(self.np_random.integers(0, 100000))
+            return np.full(self.observation_space.shape, 17, np.uint8), {}
+
+        def step(self, action):
+            self.steps += 1
+            return np.full(self.observation_space.shape, 17 + self.steps, np.uint8), 1., False, self.steps == 2, {
+                'seed': self.engine_seed, 'is_success': False, 'termination_reason': 'fixture',
+                'shots': 0, 'hits': 0, 'kills': 0, 'moving_shots': 0, 'simulation_time': .1}
+
+    torch.set_num_threads(1)
+    teacher = PPO('CnnPolicy', DummyVecEnv([SeedEnv]), n_steps=4, batch_size=4, n_epochs=2,
+                  policy_kwargs=learning.policy_kwargs('normalized'), device='cpu', seed=42,
+                  learning_rate=3e-5, ent_coef=.002, target_kl=.02)
+    teacher.learn(4)
+    checkpoint = tmp_path/'parent.zip'
+    learning.save_model(teacher, checkpoint, learning.metadata(config, 'ppo', test_only=True,
+                       policy_variant='normalized', episodes=[]))
+    optimizer = teacher.policy.optimizer.state_dict()
+    assert optimizer['state']
+    original_learn = PPO.learn
+    expected_lr = 3e-6 if override else 3e-5
+    expected_kl = .005 if override else .02
+
+    def check_before_update(model, *args, **kwargs):
+        assert model.seed == 1042
+        assert (model.n_steps, model.batch_size, model.n_epochs) == (4, 4, 2)
+        assert model.lr_schedule(1) == expected_lr and model.ent_coef == .002 and model.target_kl == expected_kl
+        assert all(torch.equal(t, model.policy.state_dict()[n]) for n, t in teacher.policy.state_dict().items())
+        actual = model.policy.optimizer.state_dict()
+        assert actual['param_groups'] == [dict(group, lr=expected_lr) for group in optimizer['param_groups']]
+        for key, state in optimizer['state'].items():
+            assert all(torch.equal(value, actual['state'][key][name]) for name, value in state.items())
+        return original_learn(model, *args, **kwargs)
+
+    seen_seeds.clear()
+    monkeypatch.setattr(PPO, 'learn', check_before_update)
+    monkeypatch.setattr(cli, 'make_vector_env', lambda *unused: DummyVecEnv([SeedEnv]))
+    args = SimpleNamespace(cpu_threads=1, output=str(tmp_path/'resumed'), scenario=str(scenario),
+        resume=str(checkpoint), init_bc=None, learning_rate=3e-4, entropy_coef=0., target_kl=.1,
+        seed=1042, device='cpu', envs=1, steps=4, rollout=8, batch_size=2,
+        checkpoint_every=4, eval_every=0, eval_episodes=1)
+    if override:
+        args.resume_learning_rate, args.resume_target_kl = expected_lr, expected_kl
+    cli.train(args)
+    assert seen_seeds[0] == 1042
+    meta = json.loads((tmp_path/'resumed/latest.json').read_text())
+    assert meta['training_rng_seed'] == 1042 and meta['num_timesteps'] == 8
+    assert meta['ppo_rollout_steps'] == meta['ppo_batch_size'] == 4
+    assert meta['ppo_learning_rate'] == expected_lr and meta['target_kl'] == expected_kl
+    assert meta['resume_overrides'] == ({'learning_rate':expected_lr,'target_kl':expected_kl} if override else {})
+    rows = [json.loads(x) for x in (tmp_path/'resumed/training-episodes.jsonl').read_text().splitlines()]
+    assert rows[0]['seed'] == int(np.random.default_rng(1042).integers(0, 100000))
+    assert all(0 <= row['seed'] < 100000 for row in rows)
+    teacher.get_env().close()
+
+
+@pytest.mark.parametrize('option,value', [('resume_learning_rate',0.),('resume_learning_rate',float('nan')),
+                                         ('resume_target_kl',-1.),('resume_target_kl',float('inf'))])
+def test_invalid_resume_overrides_fail_before_creating_environment(option, value):
+    from valorant_lab import cli
+    args = SimpleNamespace(learning_rate=3e-5, entropy_coef=.002, target_kl=.02, resume='unused')
+    setattr(args,option,value)
+    with pytest.raises(ValueError,match='positive and finite'):
+        cli.train(args)
+    args.resume = None
+    setattr(args,option,.005)
+    with pytest.raises(ValueError,match='require --resume'):
+        cli.train(args)
+
+
+def test_separate_critic_preserves_bc_but_value_gradients_cannot_change_actor(tmp_path, sample_data):
+    config, _, _ = sample_data
+    torch.set_num_threads(1)
+    teacher = PPO('CnnPolicy', learning.OfflineSpaces(config), n_steps=2, batch_size=2,
+                  policy_kwargs=learning.policy_kwargs('spatial-dropout'), device='cpu', seed=42)
+    teacher.save(tmp_path/'teacher.zip')
+    model = learning.initialize_ppo_from_bc(learning.OfflineSpaces(config), tmp_path/'teacher.zip',
+                separate_critic=True, n_steps=4, batch_size=4, device='cpu', seed=42)
+    images = torch.randint(0, 256, (4, 12, 64, 64), dtype=torch.uint8)
+    teacher.policy.set_training_mode(False)
+    with torch.no_grad():
+        a = teacher.policy.get_distribution(images).distribution
+        b = model.policy.get_distribution(images).distribution
+        assert all(torch.equal(x.probs, y.probs) for x, y in zip(a, b))
+    assert model.policy.pi_features_extractor is not model.policy.vf_features_extractor
+    actor_before = {n: p.detach().clone() for n, p in model.policy.pi_features_extractor.named_parameters()}
+    critic_before = {n: p.detach().clone() for n, p in model.policy.vf_features_extractor.named_parameters()}
+    model.policy.optimizer.zero_grad(set_to_none=True)
+    (model.policy.predict_values(images) - 5.).square().mean().backward()
+    assert all(p.grad is None for p in model.policy.pi_features_extractor.parameters())
+    model.policy.optimizer.step()
+    assert all(torch.equal(actor_before[n], p) for n,p in model.policy.pi_features_extractor.named_parameters())
+    assert any(not torch.equal(critic_before[n], p) for n,p in model.policy.vf_features_extractor.named_parameters())
+    model.get_env().close()
+    teacher.get_env().close()
+
+
+def test_rehearsal_train_only_resumes_sampler_optimizer_and_preserves_critic(tmp_path, sample_data):
+    from valorant_lab.online_learning import RehearsalPPO
+    config, _, episodes = sample_data
+    torch.set_num_threads(1)
+    teacher = PPO('CnnPolicy', learning.OfflineSpaces(config), n_steps=2, batch_size=2,
+                  policy_kwargs=learning.policy_kwargs('normalized'), device='cpu', seed=42)
+    teacher.save(tmp_path/'teacher.zip')
+    model = learning.initialize_ppo_from_bc(learning.OfflineSpaces(config), tmp_path/'teacher.zip',
+        separate_critic=True, algorithm_class=RehearsalPPO, n_steps=4, batch_size=4,
+        device='cpu', learning_rate=3e-4, seed=42)
+    details = model.configure_rehearsal(episodes, config, updates=8, batch_size=4)
+    training_ids = [m['episode_id'] for _,m in episodes if m['split']=='train']
+    assert details['episode_ids'] == training_ids and details['samples'] == 7
+    assert len(model._rehearsal_dataset) == 7  # validation's three rows never enter the cache
+    images, actions = model._rehearsal_dataset.batch(model._rehearsal_indices)
+    with torch.no_grad():
+        before = float(behavioral_loss(model.policy.get_distribution(images), actions, model._rehearsal_weights))
+    critic_before = {n: p.detach().clone() for n,p in model.policy.named_parameters()
+                     if n.startswith(('vf_features_extractor.', 'mlp_extractor.value_net.', 'value_net.'))}
+    model._rehearse()
+    with torch.no_grad():
+        after = float(behavioral_loss(model.policy.get_distribution(images), actions, model._rehearsal_weights))
+    assert after < before
+    assert all(torch.equal(p, dict(model.policy.named_parameters())[n]) for n,p in critic_before.items())
+    model.save(tmp_path/'rehearsal.zip')
+    loaded = RehearsalPPO.load(tmp_path/'rehearsal.zip', device='cpu')
+    assert not hasattr(loaded, '_rehearsal_dataset')
+    with pytest.raises(RuntimeError, match='Reattach'):
+        loaded._rehearse()
+    with pytest.raises(ValueError, match='changed on resume'):
+        loaded.configure_rehearsal(episodes, config, updates=9, batch_size=4)
+    loaded.configure_rehearsal(episodes, config, updates=8, batch_size=4)
+    model._rehearse()
+    loaded._rehearse()
+    assert model.rehearsal_updates == loaded.rehearsal_updates == 16
+    assert all(torch.equal(t, loaded.policy.state_dict()[n]) for n,t in model.policy.state_dict().items())
+    for k, state in model.policy.optimizer.state_dict()['state'].items():
+        assert all(torch.equal(v, loaded.policy.optimizer.state_dict()['state'][k][n]) for n,v in state.items())
+    teacher.get_env().close()
+    model.get_env().close()
 
 
 def test_restart_falls_back_only_for_damaged_bundle(tmp_path, sample_data):

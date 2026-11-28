@@ -49,6 +49,7 @@ def check(name, steps, *, guide=True):
                        check=True, timeout=max(90, steps * .15))
     manifest = json.loads((job / "capture/native.json").read_text(encoding="utf-8"))
     assert manifest["source"] == "script_test" and not manifest["accepted"], job
+    assert manifest.get("visual_revision") == "fixed-step-visuals-v3", job
     log_text = (job / "engine.log").read_text(encoding="utf-8-sig")
     if guide:
         assert "[native-guide] separate_viewport=true" in log_text, job
@@ -68,6 +69,7 @@ def check(name, steps, *, guide=True):
     episode = import_capture(job, ROOT / "runs/native-qa-demonstrations")
     converted = json.loads((episode / "episode.json").read_text(encoding="utf-8"))
     assert not converted["accepted"] and converted["source"] == "script_test", job
+    assert converted["collection"]["visual_revision"] == manifest["visual_revision"], job
     rows = [json.loads(line) for line in (job / "capture/steps.jsonl").read_text(encoding="utf-8-sig").splitlines()]
     for prior, current in zip(rows, rows[1:]):
         for key in ("step", "simulation_time", "position", "yaw", "pitch", "ammo"):
@@ -75,6 +77,7 @@ def check(name, steps, *, guide=True):
     if name == "action-pause":
         assert any(row["timing"]["paused_seconds"] >= .3 for row in rows), job
     result = {"case": name, "guide": guide, "job": str(job), "steps": manifest["steps"],
+              "visual_revision": manifest["visual_revision"],
               "wall_seconds": manifest["final"]["wall_seconds"],
               "simulation_seconds": manifest["final"]["simulation_time"],
               "quality_issues": manifest["quality_issues"], **manifest["performance"]}

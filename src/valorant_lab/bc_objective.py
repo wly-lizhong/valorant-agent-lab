@@ -2,19 +2,26 @@
 from __future__ import annotations
 
 import math
+import numpy as np
 import torch
 
 from .dataset import read_demonstration_chunk
 
 
-def train_action_counts(episodes, action_sizes):
+def train_action_counts(episodes, action_sizes, sample_indices=None):
     """Do not inspect validation labels when fitting the supervised objective."""
     counts = [torch.zeros(int(size), dtype=torch.int64) for size in action_sizes]
+    offset = 0
+    indices = None if sample_indices is None else np.asarray(sample_indices)
     for path, meta in episodes:
         if meta["split"] != "train":
             continue
         for chunk in range(len(meta["chunks"])):
             _, actions = read_demonstration_chunk(path, meta, chunk)
+            end = offset + len(actions)
+            if indices is not None:
+                actions = actions[indices[(indices >= offset) & (indices < end)] - offset]
+            offset = end
             labels = torch.as_tensor(actions.astype("int64", copy=False))
             for head, count in enumerate(counts):
                 count.add_(torch.bincount(labels[:, head], minlength=len(count)))

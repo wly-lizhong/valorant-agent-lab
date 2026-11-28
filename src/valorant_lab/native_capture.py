@@ -44,7 +44,8 @@ def import_capture(job, output):
     writer = EpisodeWriter(output, config, request["engine_seed"], source=manifest["source"],
                            split=request["split"], case_id=request.get("case_id"))
     writer.manifest.update(native_capture_id=capture_id, collection={"transport": "native_window_v1",
-        "alignment": "rendered_pre_action_v1", "input": "scenario_action_bins", "physics_hz": 60})
+        "alignment": "rendered_pre_action_v1", "input": "scenario_action_bins", "physics_hz": 60,
+        "visual_revision": manifest.get("visual_revision")})
     if "performance" in manifest:
         writer.manifest["collection"]["performance"] = manifest["performance"]
     try:

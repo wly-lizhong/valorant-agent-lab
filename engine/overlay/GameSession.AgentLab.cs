@@ -63,6 +63,15 @@ public partial class GameSession
         if (agentHud != null) { agentHud.Visible = config.PlayerHud; agentHud.QueueRedraw(); }
         if (Mode is MovementCombatMode task) task.ResetEpisode();
         UpdateCamera();
+        // Visual state belongs to this episode too. Do not consume gameplay RNG.
+        viewmodel?.AgentReset(seed ^ 0x51f15e);
+        foreach (var fx in World.GetChildren().OfType<CaValAim.Game.Fx.FxWorld>())
+            fx.AgentReset(seed ^ 0x137a21);
+        UpdateAdsVisuals();
+        crosshair.Profile = TrialCrosshair ?? CrosshairCode.Effective;
+        crosshair.MovementErrorPx = crosshair.FiringErrorPx = 0;
+        crosshair.MinErrorPx = weaponDef == null ? 0 : DegToPx(weaponDef.FirstShotHip);
+        crosshair.QueueRedraw();
     }
 
     bool AgentKey(InputBinding key)
@@ -98,8 +107,17 @@ public partial class GameSession
             View.Yaw = Mathf.Wrap(View.Yaw + config.YawBins[agentAction[3]] / config.ActionRepeat, -180f, 180f);
             View.Pitch = Mathf.Clamp(View.Pitch + config.PitchBins[agentAction[4]] / config.ActionRepeat, -89, 89);
             _Process(1.0 / config.PhysicsHz);
+            viewmodel?.AgentTick(1.0 / config.PhysicsHz);
+            foreach (var fx in World.GetChildren().OfType<CaValAim.Game.Fx.FxWorld>())
+                fx.AgentTick(1.0 / config.PhysicsHz);
             agentHud?.QueueRedraw();
         }
         finally { agentTicking = false; }
+    }
+
+    public void AgentRender()
+    {
+        foreach (var fx in World.GetChildren().OfType<CaValAim.Game.Fx.FxWorld>())
+            fx.AgentRender();
     }
 }

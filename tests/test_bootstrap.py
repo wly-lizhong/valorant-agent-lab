@@ -34,3 +34,14 @@ def test_existing_download_requires_matching_hash(tmp_path):
     archive.write_bytes(b"corrupt")
     with pytest.raises(ValueError, match="Checksum"):
         fetch("https://example.invalid/source.zip", archive, "0" * 64)
+
+
+def test_visual_rng_patch_does_not_mistake_original_for_replacement(tmp_path):
+    source = tmp_path / "Viewmodel.cs"
+    source.write_text("class Viewmodel {\n    readonly Random rng = new();\n}")
+    original = "\n    readonly Random rng = new();"
+    replacement = "\n    Random rng = new();"
+    patch_once(source, original, replacement)
+    assert "readonly" not in source.read_text()
+    patch_once(source, original, replacement)
+    assert source.read_text().count("Random rng") == 1

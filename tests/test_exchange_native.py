@@ -39,6 +39,46 @@ def test_bundle_roundtrip_and_dedup(tmp_path,cfg,kind):
     if kind=='demos': assert len(load_episodes(target,cfg))==1
 
 
+def test_excluded_demo_stays_out_of_training_export_and_reimport(tmp_path, cfg):
+    source, target = tmp_path / 'source', tmp_path / 'target'
+    excluded_source = episode(source, cfg, 162)
+    kept_source = episode(source, cfg, 63)
+    archive = exchange.pack(source, 'demos', tmp_path / 'batch.valab.zip')
+    exchange.unpack(archive, target, 'demos')
+    excluded = target / '.excluded' / excluded_source.name
+    excluded.parent.mkdir()
+    (target / excluded_source.name).rename(excluded)
+    original_hashes = {p.name: sha256(p) for p in excluded.iterdir()}
+    write_json(excluded / 'exclusion.json', {'reason': 'User reported wrong split'})
+    assert [p.name for p, _ in load_episodes(target, cfg)] == [kept_source.name]
+    assert exchange.unpack(archive, target, 'demos') == {'kind': 'demos', 'imported': 0, 'skipped': 2}
+    assert not (target / excluded_source.name).exists()
+    assert all(sha256(excluded / name) == digest for name, digest in original_hashes.items())
+    clean = exchange.pack(target, 'demos', tmp_path / 'clean.valab.zip')
+    exchange.unpack(clean, tmp_path / 'clean', 'demos')
+    assert [p.name for p, _ in load_episodes(tmp_path / 'clean', cfg)] == [kept_source.name]
+
+
+@pytest.mark.parametrize('conflict', ['changed_payload', 'active_duplicate'])
+def test_conflicting_excluded_record_is_preserved(tmp_path, cfg, conflict):
+    source, target = tmp_path / 'source', tmp_path / 'target'
+    record = episode(source, cfg, 162)
+    archive = exchange.pack(source, 'demos', tmp_path / 'batch.valab.zip')
+    exchange.unpack(archive, target, 'demos')
+    excluded = target / '.excluded' / record.name
+    excluded.parent.mkdir()
+    (target / record.name).rename(excluded)
+    if conflict == 'changed_payload':
+        (record / 'diagnostics.jsonl').write_text('changed diagnostics\n')
+        archive = exchange.pack(source, 'demos', tmp_path / 'changed.valab.zip')
+    else:
+        shutil.copytree(excluded, target / record.name)
+    hashes = {p.name: sha256(p) for p in excluded.iterdir()}
+    with pytest.raises(ValueError, match='excluded'):
+        exchange.unpack(archive, target, 'demos')
+    assert all(sha256(excluded / name) == digest for name, digest in hashes.items())
+
+
 def test_checksum_failure_never_modifies_destination(tmp_path,cfg):
     task(tmp_path/'source',cfg)
     archive=exchange.pack(tmp_path/'source','tasks',tmp_path/'x.valab.zip')
@@ -113,6 +153,19 @@ def test_native_conversion_preserves_alignment_and_is_idempotent(tmp_path,cfg):
     [(directory,m)]=load_episodes(target,cfg)
     assert m['collection']['alignment']=='rendered_pre_action_v1'
     with np.load(directory/m['chunks'][0]['file']) as z: assert z['frames'].shape==(1,144,256,3)
+
+
+@pytest.mark.parametrize("revision", [None, "fixed-step-visuals-v3"])
+def test_native_conversion_preserves_visual_version_without_relabelling_old_data(tmp_path, cfg, revision):
+    job, _ = native_job(tmp_path, cfg)
+    path = job / "capture/native.json"
+    manifest = json.loads(path.read_text())
+    if revision is not None:
+        manifest["visual_revision"] = revision
+        write_json(path, manifest)
+    result = import_capture(job, tmp_path / "demos")
+    episode_meta = json.loads((result / "episode.json").read_text())
+    assert episode_meta["collection"]["visual_revision"] == revision
 
 
 def test_new_goal_task_rejects_capture_from_old_engine(tmp_path, cfg):

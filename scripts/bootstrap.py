@@ -111,6 +111,15 @@ def main() -> None:
     patch_once(game_file, anchor, anchor + "\n        if (AgentControlled) return;")
     patch_once(game_file, "Mode.EffectiveInfiniteAmmo, Mode.EffectiveInfiniteReserve, Mode.Movement);",
                "Mode.EffectiveInfiniteAmmo, AgentControlled ? false : Mode.EffectiveInfiniteReserve, Mode.Movement);")
+    # Agent resets must seed presentation RNGs independently of gameplay RNG.
+    # Ordinary upstream sessions keep their original constructor defaults.
+    for relative in ("Game/Weapon/Viewmodel.cs", "Game/Weapon/MuzzleFlash.cs", "Game/Fx/FxWorld.cs"):
+        patch_once(project / "src" / relative,
+                   "\n    readonly Random rng = new();", "\n    Random rng = new();")
+    fx_file = project / "src/Game/Fx/FxWorld.cs"
+    patch_once(fx_file, "\n    static void Burst(", "\n    void Burst(")
+    patch_once(fx_file, "p.Restart();", "p.Restart(agentVisualClock);")
+    patch_once(fx_file, "p.Emitting = true;", "p.Emitting = true;\n        AgentParticleBurst(p);")
     if args.source_only:
         print("Pinned upstream source and overlay prepared")
         return

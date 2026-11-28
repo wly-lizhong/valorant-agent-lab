@@ -143,7 +143,8 @@ class ValorantNavigationEnv(gym.Env):
                         raise RuntimeError("Engine clock mismatch")
                     if data.get("completion_rule", "ordered_waypoints") != self.config.get("completion_rule", "ordered_waypoints"):
                         raise RuntimeError("Engine completion rule is outdated; rerun scripts/bootstrap.py")
-                    self.engine_metadata = {k: data.get(k) for k in ("revision", "render_device", "render_vendor", "clock")}
+                    self.engine_metadata = {k: data.get(k) for k in (
+                        "revision", "render_device", "render_vendor", "clock", "visual_revision")}
                     if os.environ.get("VALORANT_LAB_GPU_REQUIRED") == "1":
                         from .cloud import SOFTWARE
                         renderer = (str(data.get("render_vendor", "")) + " " + str(data.get("render_device", ""))).lower()

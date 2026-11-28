@@ -261,7 +261,7 @@ public partial class AgentBridge
         humanState = "saving";
         try
         {
-            humanWriter!.Finish(new { schema = "valorant-native-v1", engine = EngineIdentity, source = HumanTest ? "script_test" : "human",
+            humanWriter!.Finish(new { schema = "valorant-native-v1", engine = EngineIdentity, visual_revision = VisualRevision, source = HumanTest ? "script_test" : "human",
                 completion_rule = config.CompletionRule,
                 engine_seed = seed, final = humanFinal ?? Info(), steps = humanWriter.Count,
                 performance = new { recovered_stalls = humanRecoveryCount, dropped_seconds = droppedSeconds, fps_cap = Engine.MaxFps },
@@ -275,7 +275,7 @@ public partial class AgentBridge
     {
         if (humanWriter == null || humanState == "finished") return;
         humanWriter.Issues.Add("window_closed");
-        humanWriter.Finish(new { schema = "valorant-native-v1", engine = EngineIdentity, source = HumanTest ? "script_test" : "human",
+        humanWriter.Finish(new { schema = "valorant-native-v1", engine = EngineIdentity, visual_revision = VisualRevision, source = HumanTest ? "script_test" : "human",
             completion_rule = config.CompletionRule,
             engine_seed = seed, final = humanFinal ?? Info(), steps = humanWriter.Count,
             performance = new { recovered_stalls = humanRecoveryCount, dropped_seconds = droppedSeconds, fps_cap = Engine.MaxFps },

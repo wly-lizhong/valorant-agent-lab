@@ -12,6 +12,67 @@ from valorant_lab.env import ROOT
 from valorant_lab.scenario import load_scenario, noop
 
 
+def test_initial_idle_view_keeps_histories_later_stops_and_all_validation(tmp_path):
+    from valorant_lab.bc_data import training_sample_indices
+    from valorant_lab.bc_objective import train_action_counts
+    from valorant_lab.dataset import sha256
+    from valorant_lab.scenario import action_sizes
+    config = load_scenario(ROOT / "configs/lotus_movement_combat.json")
+    first_active = {42: 3, 43: 1, 100142: 3}
+    for seed, split in ((42, "train"), (43, "train"), (100142, "validation")):
+        writer = EpisodeWriter(tmp_path, config, seed, source="script_test", split=split, chunk_size=2)
+        for step in range(8):
+            frame = np.full((144, 256, 3), (seed + step) % 256, np.uint8)
+            action = noop(config)
+            if step == first_active[seed]:
+                action[0] = 1
+            if step == 6:
+                action[6] = 1
+            writer.append(frame, action, before={}, after={}, timing={})
+        writer.finish({"is_success": True}, accepted=True)
+    episodes = load_episodes(tmp_path, config, allow_test_data=True)
+    before = {str(p): sha256(p) for p in tmp_path.rglob("*") if p.is_file()}
+    indices, report = training_sample_indices(episodes, "skip")
+    train = [e for e in episodes if e[1]["split"] == "train"]
+    validation = [e for e in episodes if e[1]["split"] == "validation"]
+    expected = [offset * 8 + i for offset, (_, m) in enumerate(train)
+                for i in range(first_active[m["engine_seed"]], 8)]
+    assert indices.tolist() == expected and report["excluded_initial_idle_steps"] == 4
+    assert len(indices) == 12  # Later stops, including the final no-op, remain selected.
+    reference = DemonstrationDataset(train)
+    train_cached, val_cached, info = make_bc_batches(
+        episodes, device="cpu", batch_size=5, mode="cpu", budget_mib=16, train_indices=indices)
+    torch.manual_seed(42)
+    actual = list(train_cached)
+    train_stream, val_stream, _ = make_bc_batches(
+        episodes, device="cpu", batch_size=5, mode="stream", budget_mib=16, train_indices=indices)
+    torch.manual_seed(42)
+    streamed = list(train_stream)
+    for (x, y), (a, b) in zip(actual, streamed):
+        assert torch.equal(x, a) and torch.equal(y, b)
+    cached = train_cached.dataset
+    for index in indices:
+        x, y = cached.batch([index])
+        expected_x, expected_y = reference[int(index)]
+        assert np.array_equal(x[0].numpy(), expected_x)
+        assert np.array_equal(y[0].numpy(), expected_y)
+    assert torch.equal(torch.cat([y for _, y in val_cached]), torch.cat([y for _, y in val_stream]))
+    assert sum(len(y) for _, y in val_stream) == len(DemonstrationDataset(validation)) == 8
+    assert info["training_steps"] == 12 and info["original_training_steps"] == 16
+    counts = train_action_counts(episodes, action_sizes(config), indices)
+    assert counts[0].sum() == 12 and counts[6].tolist() == [10, 2]
+    assert before == {str(p): sha256(p) for p in tmp_path.rglob("*") if p.is_file()}
+    kept, kept_report = training_sample_indices(episodes)
+    assert kept is None and kept_report["excluded_initial_idle_steps"] == 0
+
+
+@pytest.mark.parametrize("indices", [[], [1, 1], [-1, 0], [999], [2, 1], [1.5]])
+def test_sampling_indices_cannot_alias_or_escape_training(demonstrations, indices):
+    _, episodes = demonstrations
+    with pytest.raises(ValueError, match="Training indices"):
+        make_bc_batches(episodes, device="cpu", batch_size=2, train_indices=indices)
+
+
 @pytest.fixture
 def demonstrations(tmp_path):
     config = load_scenario(ROOT / "configs/lotus_movement_combat.json")

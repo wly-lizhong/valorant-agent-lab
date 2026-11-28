@@ -9,6 +9,7 @@ from .corrections import enqueue_failure, load_case, update_case
 from .dataset import sha256, split_seed, write_json
 from .env import ValorantEnv
 from .scenario import FRAME_STACK, load_scenario, require_contract
+from .policy_actions import PolicyActions, selection_settings
 
 
 def stack_frame(history, frame):
@@ -19,6 +20,7 @@ def stack_frame(history, frame):
 
 
 def evaluate(args):
+    selection = selection_settings(args)
     if getattr(args, "workers", 1) > 1:
         from .evaluation_parallel import evaluate_parallel
         return evaluate_parallel(args)
@@ -44,6 +46,7 @@ def evaluate(args):
     with ValorantEnv(scenario, realtime=args.realtime) as env:
         for episode in range(1 if case else args.episodes):
             engine_seed = case["engine_seed"] if case else split_seed(args.split, args.seed + episode)
+            selector = PolicyActions(model, selection, engine_seed)
             frame, info = env.reset(options={"engine_seed": engine_seed})
             # Validation/dev seeds can be deliberately promoted; report training overlap explicitly.
             from .scenario import digest
@@ -63,7 +66,7 @@ def evaluate(args):
             with (directory / "trace.jsonl").open("w", encoding="utf-8") as log:
                 while True:
                     begin = time.monotonic()
-                    action, _ = model.predict(observation, deterministic=True)
+                    action = selector.predict(observation)
                     infer = (time.monotonic() - begin) * 1000
                     frame, reward, terminated, truncated, info = env.step(action)
                     received = time.monotonic()
@@ -89,6 +92,7 @@ def evaluate(args):
                            and info.get("watchdog_releases", 1) == 0
                            and p95 <= period_ms and interval95 <= 2 * period_ms)
             record = {"engine_seed": engine_seed, "success": bool(info["is_success"]),
+                      "policy_sampling_seed": selector.sampling_seed,
                       "reward": total_reward, "termination_reason": info.get("termination_reason"),
                       "simulation_seconds": info["simulation_time"], "elapsed_seconds": time.monotonic() - started,
                       "inference_p95_ms": p95, "observation_interval_p95_ms": interval95,
@@ -105,6 +109,7 @@ def evaluate(args):
                 update_case(args.case, **changes)
             results.append(record)
     report = {"model_sha256": model_hash, "model_test_only": model_meta.get("test_only", False),
+              "action_selection": selection,
               "split": args.split, "clock": "realtime" if args.realtime else "lockstep",
               "scenario": config, "success_rate": float(np.mean([r["success"] for r in results])),
               "realtime_task_pass_rate": float(np.mean([r["realtime_task_pass"] for r in results])),

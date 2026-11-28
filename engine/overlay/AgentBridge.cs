@@ -12,6 +12,7 @@ namespace CaValAim.AgentLab;
 public partial class AgentBridge : Node
 {
     const string EngineIdentity = "ca-val-aim-v2.15.0-lab-v3";
+    const string VisualRevision = "fixed-step-visuals-v3";
     record Request(JsonElement Data, TaskCompletionSource<string> Completion);
     readonly GameSession session;
     readonly AgentConfig config;
@@ -46,6 +47,7 @@ public partial class AgentBridge : Node
             pid = System.Environment.ProcessId, scenario = config.Id, map = config.Map,
             action_sizes = config.ActionSizes, clock = realtime ? "realtime" : "lockstep",
             completion_rule = config.CompletionRule,
+            visual_revision = VisualRevision,
             render_device = RenderingServer.GetVideoAdapterName(),
             render_vendor = RenderingServer.GetVideoAdapterVendor()
         }));
@@ -129,7 +131,7 @@ public partial class AgentBridge : Node
     }
     public override void _Process(double delta)
     {
-        if (humanDirectory != null) { HumanProcess(); return; }
+        if (humanDirectory != null) { HumanProcess(); session.AgentRender(); return; }
         if (realtime && running && !resetRequired)
         {
             double now = Clock;
@@ -150,6 +152,7 @@ public partial class AgentBridge : Node
                 accumulator -= 1.0 / config.PhysicsHz;
             }
         }
+        session.AgentRender();
         if (busy || !requests.TryDequeue(out var request)) return;
         busy = true;
         Handle(request);
@@ -194,6 +197,7 @@ public partial class AgentBridge : Node
                 else if (steps == 0) throw new InvalidOperationException("Call reset before step");
             }
             else throw new ArgumentException("Unknown command");
+            session.AgentRender();
             await ToSignal(RenderingServer.Singleton, RenderingServer.SignalName.FramePostDraw);
             using var image = GetViewport().GetTexture().GetImage();
             if (image == null || image.IsEmpty()) throw new InvalidOperationException("Renderer returned no pixels");
@@ -231,6 +235,7 @@ public partial class AgentBridge : Node
         double wall = Clock - startedWall;
         return new {
                 scenario = config.Id, family = config.Family, map = config.Map, mode = config.Mode,
+                visual_revision = VisualRevision,
                 seed, step = steps, frame_id = frameId++, simulation_time = session.Now,
                 is_success = success, termination_reason = reason, distance_to_goal = previousDistance,
                 // These privileged diagnostics never enter observations or the BC data loader.

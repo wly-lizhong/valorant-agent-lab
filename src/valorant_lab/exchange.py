@@ -158,10 +158,24 @@ def unpack(archive, destination, expected_kind=None):
                     if prior != old["split"]: raise ValueError("Existing train/validation leakage")
         new_items, skipped = [], 0
         for item, meta, files in checked:
+            target = destination / item.name
             if kind == "demos":
+                excluded_root = destination / ".excluded"
+                excluded = excluded_root / item.name
+                if excluded_root.is_symlink() or excluded.is_symlink():
+                    raise ValueError("Excluded demonstrations may not be symlinks")
+                if excluded.exists():
+                    if target.exists() or target.is_symlink():
+                        raise ValueError("Episode exists in both active and excluded data")
+                    _, excluded_files = validate_item(excluded, kind)
+                    if excluded_files != files or any(sha256(excluded / f) != sha256(item / f) for f in files):
+                        raise ValueError("Conflicting excluded ID; preserving excluded data")
+                    # Keep explicit exclusions across cumulative/repeated uploads. The
+                    # raw files remain unchanged, outside the loader/exporter's glob.
+                    skipped += 1
+                    continue
                 prior = groups.setdefault(meta["case_key"], meta["split"])
                 if prior != meta["split"]: raise ValueError("Train/validation leakage")
-            target = destination / item.name
             if target.is_symlink(): raise ValueError("Destination may not be a symlink")
             if target.exists():
                 old, old_files = validate_item(target, kind)

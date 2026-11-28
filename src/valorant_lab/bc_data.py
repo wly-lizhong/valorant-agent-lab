@@ -4,12 +4,41 @@ from __future__ import annotations
 import time
 import numpy as np
 import torch
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Subset
 
 from .dataset import DemonstrationDataset, read_demonstration_chunk
-from .scenario import FRAME_STACK
+from .scenario import FRAME_STACK, noop
 
 MIB = 1024**2
+
+
+def training_sample_indices(episodes, initial_idle_policy="keep"):
+    """Optional train-only sample view; never shorten the underlying RGB histories."""
+    if initial_idle_policy not in ("keep", "skip"):
+        raise ValueError("Initial idle policy must be keep or skip")
+    report = {"initial_idle_policy": initial_idle_policy, "excluded_initial_idle_steps": 0,
+              "episodes": []}
+    if initial_idle_policy == "keep":
+        return None, report
+    selected, offset = [], 0
+    for path, meta in episodes:
+        if meta["split"] != "train":
+            continue
+        leading = 0
+        for chunk in range(len(meta["chunks"])):
+            _, actions = read_demonstration_chunk(path, meta, chunk)
+            active = np.flatnonzero(np.any(actions != noop(meta["scenario"]), axis=1))
+            if len(active):
+                leading += int(active[0])
+                break
+            leading += len(actions)
+        selected.extend(range(offset + leading, offset + meta["steps"]))
+        offset += meta["steps"]
+        report["episodes"].append({"episode": path.name, "excluded_initial_idle_steps": leading})
+        report["excluded_initial_idle_steps"] += leading
+    if not selected:
+        raise ValueError("Initial idle sampling left no training actions")
+    return np.asarray(selected, dtype=np.int64), report
 
 
 def cache_bytes(episodes):
@@ -90,10 +119,10 @@ class CachedDemonstrations:
 
 
 class CachedBatches:
-    def __init__(self, dataset, batch_size, shuffle):
+    def __init__(self, dataset, batch_size, shuffle, indices=None):
         self.dataset = dataset
         # Keep DataLoader's sampler/RNG behavior identical to the original path.
-        self.indices = DataLoader(range(len(dataset)), batch_size=batch_size,
+        self.indices = DataLoader(range(len(dataset)) if indices is None else indices, batch_size=batch_size,
                                   shuffle=shuffle, num_workers=0)
 
     def __iter__(self):
@@ -104,28 +133,40 @@ class CachedBatches:
         return len(self.indices)
 
 
-def make_bc_batches(episodes, *, device, batch_size, mode="auto", budget_mib=1024):
+def make_bc_batches(episodes, *, device, batch_size, mode="auto", budget_mib=1024, train_indices=None):
     train = [e for e in episodes if e[1]["split"] == "train"]
     validation = [e for e in episodes if e[1]["split"] == "validation"]
     counts = [sum(m["steps"] for _, m in group) for group in (train, validation)]
     if not all(counts):
         raise ValueError("BC requires accepted train AND validation episodes, separated by scenario/seed")
+    original_train_count = counts[0]
+    if train_indices is not None:
+        train_indices = np.asarray(train_indices)
+        if (train_indices.ndim != 1 or train_indices.dtype.kind not in "iu" or not len(train_indices)
+                or train_indices[0] < 0 or train_indices[-1] >= counts[0]
+                or np.any(train_indices[1:] <= train_indices[:-1])):
+            raise ValueError("Training indices must be nonempty, sorted, unique and within train")
+        counts[0] = len(train_indices)
     needed = cache_bytes(train) + cache_bytes(validation)
     selected = select_cache(mode, needed, int(budget_mib * MIB), device)
     started = time.perf_counter()
     if selected == "stream":
-        train_loader = DataLoader(DemonstrationDataset(train), batch_size=batch_size, shuffle=True, num_workers=0)
+        train_dataset = DemonstrationDataset(train)
+        if train_indices is not None:
+            train_dataset = Subset(train_dataset, train_indices.tolist())
+        train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
         val_loader = DataLoader(DemonstrationDataset(validation), batch_size=batch_size, shuffle=False, num_workers=0)
     else:
         cache_device = device if selected == "cuda" else "cpu"
-        train_loader = CachedBatches(CachedDemonstrations(train, cache_device), batch_size, True)
+        train_loader = CachedBatches(CachedDemonstrations(train, cache_device), batch_size, True, train_indices)
         val_loader = CachedBatches(CachedDemonstrations(validation, cache_device), batch_size, False)
         if selected == "cuda":
             torch.cuda.synchronize(device)
     info = {"requested": mode, "mode": selected, "decoded_bytes": needed,
             "resident_bytes": needed if selected != "stream" else 0,
             "budget_mib": budget_mib, "preload_seconds": time.perf_counter() - started,
-            "training_steps": counts[0], "validation_steps": counts[1]}
+            "training_steps": counts[0], "original_training_steps": original_train_count,
+            "validation_steps": counts[1]}
     if selected == "stream" and mode == "auto":
         info["reason"] = "dataset_exceeds_cache_budget"
     return train_loader, val_loader, info

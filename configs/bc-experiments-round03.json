@@ -1,0 +1,40 @@
+{
+  "schema": "valorant-bc-experiments-v1",
+  "scenario": "configs/lotus_movement_combat.json",
+  "training": {
+    "epochs": 600,
+    "batch_size": 512,
+    "learning_rate": 0.0003,
+    "seed": 42,
+    "cpu_threads": 4,
+    "precision": "amp-fp16",
+    "data_cache": "auto",
+    "cache_mib": 1024,
+    "checkpoint_every_epochs": 50,
+    "class_weight_cap": 8
+  },
+  "candidates": [
+    {"id": "balanced-keep", "policy_variant": "normalized", "class_balance": "sqrt", "initial_idle_policy": "keep"},
+    {"id": "balanced-skip", "policy_variant": "normalized", "class_balance": "sqrt", "initial_idle_policy": "skip"}
+  ],
+  "evaluation": {
+    "split": "dev",
+    "seed": 0,
+    "episodes": 8,
+    "workers": 8,
+    "cpu_threads": 8,
+    "device": "cpu",
+    "checkpoints": ["best", "latest"],
+    "scenarios": {
+      "route": "configs/lotus_route.json",
+      "shooting": "configs/lotus_shooting.json"
+    }
+  },
+  "limits": {
+    "total_seconds": 1800,
+    "train_seconds": 600,
+    "probe_seconds": 180,
+    "evaluate_seconds": 300,
+    "attempts_per_stage": 2
+  }
+}

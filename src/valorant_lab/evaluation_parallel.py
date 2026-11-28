@@ -13,6 +13,7 @@ from PIL import Image
 from .corrections import enqueue_failure
 from .dataset import sha256, split_seed, write_json
 from .scenario import load_scenario, require_contract
+from .policy_actions import selection_settings, episode_sampling_seed
 
 
 def partitions(episodes, workers):
@@ -41,16 +42,19 @@ def _worker(arguments):
 def merge_reports(args, pieces, model_hash, config, elapsed):
     """Validate every shard before writing any correction task or final report."""
     output = Path(args.output)
+    selection = selection_settings(args)
     records = []
     for offset, directory, report in sorted(pieces, key=lambda piece: piece[0]):
         if (offset != len(records) or report["model_sha256"] != model_hash
                 or report["split"] != args.split or report["clock"] != "lockstep"
-                or report["scenario"] != config):
+                or report["scenario"] != config or report.get("action_selection") != selection):
             raise ValueError("Parallel evaluation shard identity/order mismatch")
         for local_index, record in enumerate(report["episodes"]):
             index = offset + local_index
             if record["engine_seed"] != split_seed(args.split, args.seed + index):
                 raise ValueError("Parallel evaluation seed mismatch")
+            if record.get("policy_sampling_seed") != episode_sampling_seed(selection, record["engine_seed"]):
+                raise ValueError("Parallel evaluation policy sampling seed mismatch")
             relative = Path(directory) / f"episode-{local_index:04d}"
             if not (output / relative).resolve().is_relative_to(output.resolve()):
                 raise ValueError("Evaluation artifacts must remain within the output directory")
@@ -73,6 +77,7 @@ def merge_reports(args, pieces, model_hash, config, elapsed):
                 args.queue, config, record["engine_seed"], trace, frame,
                 split=args.split, model_hash=model_hash))
     report = {"model_sha256": model_hash, "model_test_only": pieces[0][2]["model_test_only"],
+              "action_selection": selection,
               "split": args.split, "clock": "lockstep", "scenario": config,
               "evaluation_workers": len(pieces), "elapsed_seconds": elapsed,
               "success_rate": float(np.mean([r["success"] for r in records])),
@@ -82,6 +87,7 @@ def merge_reports(args, pieces, model_hash, config, elapsed):
 
 
 def evaluate_parallel(args):
+    selection_settings(args)
     if args.realtime or args.case:
         raise ValueError("Use --workers 1 for realtime or single correction-case evaluation")
     if args.queue and args.split != "dev":

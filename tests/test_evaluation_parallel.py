@@ -33,6 +33,7 @@ def shards(tmp_path):
         (directory/'trace.jsonl').write_text('\n'.join(json.dumps({'info':info}) for _ in range(40)))
         Image.fromarray(np.zeros((144,256,3),dtype=np.uint8)).save(directory/'final.png')
         report={'model_sha256':'model-hash','model_test_only':False,'clock':'lockstep',
+                'action_selection':{'mode':'mode','temperature':1.,'sampling_seed':0},
                 'scenario':config,'split':'dev','episodes':[
                     {'engine_seed':split_seed('dev',offset),'success':False,'reward':0,'final':info}]}
         pieces.append((offset,relative,report))
@@ -53,13 +54,15 @@ def test_merge_orders_seeds_and_serializes_duplicate_correction_writes(shards):
     assert json.loads((Path(args.output)/'report.json').read_text(encoding='utf-8'))==report
 
 
-@pytest.mark.parametrize('fault',['model','seed','missing','clock'])
+@pytest.mark.parametrize('fault',['model','seed','missing','clock','selection','sampling_seed'])
 def test_bad_shard_never_publishes_aggregate_or_corrections(shards,fault):
     args,config,pieces=shards
     pieces=copy.deepcopy(pieces)
     if fault=='model':pieces[-1][2]['model_sha256']='another-model'
     elif fault=='seed':pieces[-1][2]['episodes'][0]['engine_seed']=300000
     elif fault=='missing':pieces.pop()
+    elif fault=='selection':pieces[-1][2]['action_selection']['mode']='sample'
+    elif fault=='sampling_seed':pieces[-1][2]['episodes'][0]['policy_sampling_seed']=1
     else:pieces[-1][2]['clock']='realtime'
     with pytest.raises(ValueError):merge_reports(args,pieces,'model-hash',config,3.5)
     from pathlib import Path
@@ -72,3 +75,17 @@ def test_bad_shard_never_publishes_aggregate_or_corrections(shards,fault):
 def test_protected_modes_fail_before_launch(realtime,case,split,queue):
     with pytest.raises(ValueError):
         evaluate_parallel(SimpleNamespace(realtime=realtime,case=case,split=split,queue=queue))
+
+
+def test_sampling_metadata_survives_parallel_merge(shards):
+    from valorant_lab.policy_actions import selection_settings, episode_sampling_seed
+    args,config,pieces=shards
+    args.action_selection,args.action_temperature,args.sampling_seed='sample',.5,7
+    settings=selection_settings(args)
+    for _,_,report in pieces:
+        report['action_selection']=settings
+        for record in report['episodes']:
+            record['policy_sampling_seed']=episode_sampling_seed(settings,record['engine_seed'])
+    report=merge_reports(args,pieces,'model-hash',config,3.5)
+    assert report['action_selection']==settings
+    assert [x['policy_sampling_seed'] for x in report['episodes']]==[8200024,8200025]

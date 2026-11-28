@@ -14,7 +14,7 @@ from stable_baselines3 import PPO
 from stable_baselines3.common.torch_layers import BaseFeaturesExtractor
 from stable_baselines3.common.callbacks import BaseCallback
 from .dataset import load_episodes, write_json
-from .bc_data import make_bc_batches
+from .bc_data import make_bc_batches, training_sample_indices
 from .bc_objective import ActionMetrics, behavioral_loss, make_class_weights, train_action_counts
 from .bc_checkpoint import (atomic_bytes, capture_rng, dataset_fingerprint, load_checkpoint,
                             plain_metadata, restore_rng, save_checkpoint)
@@ -46,14 +46,55 @@ class NormalizedVisualEncoder(SmallVisualEncoder):
         return self.normalization(super().forward(observations))
 
 
+class RegularizedVisualEncoder(BaseFeaturesExtractor):
+    """Train-time feature dropout; optionally preserve a finer spatial grid."""
+    def __init__(self, observation_space, features_dim=256, pool_size=(3, 5), dropout=.2):
+        super().__init__(observation_space, features_dim)
+        self.network = nn.Sequential(
+            nn.Conv2d(observation_space.shape[0], 32, 8, 4), nn.ReLU(),
+            nn.Conv2d(32, 64, 4, 2), nn.ReLU(), nn.Conv2d(64, 64, 3, 1), nn.ReLU(),
+            nn.AdaptiveAvgPool2d(pool_size), nn.Flatten(), nn.Dropout(dropout),
+            nn.Linear(64 * pool_size[0] * pool_size[1], features_dim), nn.ReLU(),
+            nn.LayerNorm(features_dim))
+
+    def forward(self, observations):
+        return self.network(observations)
+
+
 def policy_kwargs(variant="legacy"):
-    if variant not in ("legacy", "normalized", "normalized-relu"):
+    if variant not in ("legacy", "normalized", "normalized-relu", "normalized-dropout", "spatial-dropout"):
         raise ValueError("Unknown BC policy variant")
     kwargs = {"features_extractor_class": SmallVisualEncoder if variant == "legacy" else NormalizedVisualEncoder,
               "net_arch": {"pi": [128], "vf": [128]}}
     if variant == "normalized-relu":
         kwargs["activation_fn"] = nn.ReLU
+    if variant in ("normalized-dropout", "spatial-dropout"):
+        kwargs["features_extractor_class"] = RegularizedVisualEncoder
+        kwargs["features_extractor_kwargs"] = {"pool_size": (7, 14) if variant == "spatial-dropout" else (3, 5)}
     return kwargs
+
+
+def initialize_ppo_from_bc(env, checkpoint, *, separate_critic=False, algorithm_class=PPO, **options):
+    """Retain the BC architecture and inference policy, with a fresh PPO optimizer.
+
+    PPO compares rollout and update log probabilities. Its feature extractor
+    must therefore not add training-only dropout masks during the update.
+    Disabling dropout preserves the saved BC policy's evaluation outputs.
+    """
+    from copy import deepcopy
+    teacher = PPO.load(checkpoint, device=options.get("device", "auto"))
+    kwargs = deepcopy(teacher.policy_kwargs)
+    if separate_critic:
+        # Both encoders start from the exact teacher weights. Subsequent value
+        # gradients cannot alter the actor's visual features.
+        kwargs["share_features_extractor"] = False
+    if any(isinstance(module, nn.Dropout) and module.p > 0 for module in teacher.policy.modules()):
+        if kwargs.get("features_extractor_class") is not RegularizedVisualEncoder:
+            raise ValueError("Unsupported dropout architecture for PPO initialization")
+        kwargs.setdefault("features_extractor_kwargs", {})["dropout"] = 0.
+    model = algorithm_class("CnnPolicy", env, policy_kwargs=kwargs, **options)
+    model.policy.load_state_dict(teacher.policy.state_dict(), strict=True)
+    return model
 
 
 class OfflineSpaces(gym.Env):
@@ -79,7 +120,10 @@ def save_model(model, path: Path, meta: dict):
     with BytesIO() as buffer:
         model.save(buffer)
         atomic_bytes(path, buffer.getvalue())
-    write_json(model_metadata_path(path), {**meta, "num_timesteps": model.num_timesteps})
+    extra = {}
+    if getattr(model, "rehearsal_identity", None):
+        extra["rehearsal"] = {**model.rehearsal_identity, "completed_updates": model.rehearsal_updates}
+    write_json(model_metadata_path(path), {**meta, **extra, "num_timesteps": model.num_timesteps})
 
 
 def training_distribution(policy, images, *, mixed_precision=False):
@@ -107,6 +151,16 @@ class TrainingCallback(BaseCallback):
         self.saved_at = self.evaluated_at = self.num_timesteps
 
     def _on_step(self):
+        finished = []
+        for done, info in zip(self.locals.get("dones", []), self.locals.get("infos", [])):
+            if done:
+                finished.append({"timesteps": self.num_timesteps,
+                    **{key: info.get(key) for key in ("seed", "is_success", "termination_reason",
+                       "shots", "hits", "kills", "moving_shots", "simulation_time")}})
+        if finished:
+            with (self.output / "training-episodes.jsonl").open("a", encoding="utf-8") as stream:
+                for record in finished:
+                    stream.write(json.dumps(record) + "\n")
         if self.num_timesteps - self.saved_at >= self.args.checkpoint_every:
             save_model(self.model, self.output / "checkpoints" / f"ppo-{self.num_timesteps}.zip", self.meta)
             self.saved_at = self.num_timesteps
@@ -147,6 +201,8 @@ def bc_train(args):
     episodes = load_episodes(args.data, config, allow_test_data=args.allow_test_data)
     if not all(any(m["split"] == split for _, m in episodes) for split in ("train", "validation")):
         raise ValueError("BC requires accepted train AND validation episodes, separated by scenario/seed")
+    idle_policy = getattr(args, "initial_idle_policy", "keep")
+    train_indices, sampling = training_sample_indices(episodes, idle_policy)
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
     resume = getattr(args, "resume", False)
@@ -154,6 +210,8 @@ def bc_train(args):
                 "policy_variant": variant, "class_balance": balance, "class_weight_cap": weight_cap,
                 "batch_size": args.batch_size, "learning_rate": args.learning_rate, "seed": args.seed,
                 "precision": precision, "cpu_threads": args.cpu_threads, "device": str(args.device)}
+    if idle_policy != "keep":
+        identity["initial_idle_policy"] = idle_policy
     if not resume and any((output / name).exists() for name in
                           ("latest.zip", "best.zip", "metrics.json", "resume.pt", "resume.previous.pt")):
         raise ValueError("BC output already contains training artifacts; use --resume or a fresh directory")
@@ -185,9 +243,10 @@ def bc_train(args):
     try:
         train_loader, val_loader, cache = make_bc_batches(
             episodes, device=model.device, batch_size=args.batch_size,
-            mode=getattr(args, "data_cache", "auto"), budget_mib=getattr(args, "cache_mib", 1024))
+            mode=getattr(args, "data_cache", "auto"), budget_mib=getattr(args, "cache_mib", 1024),
+            train_indices=train_indices)
         sizes = action_sizes(config)
-        counts = train_action_counts(episodes, sizes)
+        counts = train_action_counts(episodes, sizes, train_indices)
         weights = make_class_weights(counts, balance, weight_cap, device=model.device)
         meta.update(training_device=str(model.device), batch_size=args.batch_size,
                     learning_rate=args.learning_rate, seed=args.seed, data_cache=cache,
@@ -197,11 +256,11 @@ def bc_train(args):
                     class_counts=[count.tolist() for count in counts],
                     class_weights=[weight.cpu().tolist() for weight in weights] if weights is not None else None,
                     dataset_fingerprint=identity["dataset_fingerprint"],
-                    selection_metric="validation_loss_unweighted")
+                    selection_metric="validation_loss_unweighted", sampling=sampling)
         runtime = {"device": str(model.device), "data_cache": cache, "precision": precision,
                    "validation_precision": "fp32", "policy_variant": variant,
                    "class_balance": balance, "selection_metric": "validation_loss_unweighted",
-                   "resumed_from": resumed_from, "start_epoch": start_epoch}
+                   "resumed_from": resumed_from, "start_epoch": start_epoch, "sampling": sampling}
         if model.device.type == "cuda":
             runtime["gpu"] = torch.cuda.get_device_name(model.device)
             torch.cuda.reset_peak_memory_stats(model.device)

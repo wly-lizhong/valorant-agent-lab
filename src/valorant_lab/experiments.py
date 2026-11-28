@@ -74,12 +74,17 @@ def validate_manifest(manifest):
     if set(train) != {"epochs", "batch_size", "learning_rate", "seed", "cpu_threads", "precision",
                        "data_cache", "cache_mib", "checkpoint_every_epochs", "class_weight_cap"}:
         raise ValueError("Unexpected training options; free-form CLI commands are not accepted")
-    if set(evaluation) != {"split", "seed", "episodes", "workers", "cpu_threads", "device", "scenarios"}:
+    if set(evaluation) - {"checkpoints"} != {"split", "seed", "episodes", "workers", "cpu_threads", "device", "scenarios"}:
         raise ValueError("Unexpected evaluation options")
+    selections = evaluation.get("checkpoints", ["best"])
+    if (not isinstance(selections, list) or not selections or len(selections) > 2
+            or any(x not in ("best", "latest") for x in selections) or len(set(selections)) != len(selections)):
+        raise ValueError("Evaluation checkpoints must be unique best/latest selections")
     if evaluation["split"] != "dev":
         raise ValueError("Automatic experiments evaluate dev only; final test data stays untouched")
-    if set(evaluation["scenarios"]) != {"route", "shooting"}:
-        raise ValueError("Both route and shooting evaluations are required")
+    tasks = set(evaluation["scenarios"])
+    if not {"route", "shooting"} <= tasks or tasks - {"route", "shooting", "close-engagement", "close-clear"}:
+        raise ValueError("Both route and shooting evaluations are required; only named close diagnostics may be added")
     if set(limits) != {"total_seconds", "train_seconds", "probe_seconds", "evaluate_seconds", "attempts_per_stage"}:
         raise ValueError("Explicit total, stage and attempt limits are required")
     integers = [(train, k) for k in ("epochs", "batch_size", "cpu_threads", "cache_mib", "checkpoint_every_epochs")]
@@ -107,13 +112,16 @@ def validate_manifest(manifest):
         raise ValueError("Use 1 to 3 candidate configurations, never an unbounded search")
     ids, variants = set(), set()
     for candidate in candidates:
-        if set(candidate) != {"id", "policy_variant", "class_balance"}:
+        if set(candidate) - {"initial_idle_policy"} != {"id", "policy_variant", "class_balance"}:
             raise ValueError("Unexpected candidate fields")
+        idle = candidate.get("initial_idle_policy", "keep")
+        if idle not in ("keep", "skip"):
+            raise ValueError("Unsupported initial idle policy")
         name = candidate["id"]
-        pair = (candidate["policy_variant"], candidate["class_balance"])
+        pair = (candidate["policy_variant"], candidate["class_balance"], idle)
         if not isinstance(name, str) or not re.fullmatch(r"[a-z][a-z0-9-]{0,47}", name) or name in ids:
             raise ValueError("Candidate IDs must be unique safe directory names")
-        if pair[0] not in ("legacy", "normalized", "normalized-relu") or pair[1] not in ("none", "sqrt"):
+        if pair[0] not in ("legacy", "normalized", "normalized-relu", "normalized-dropout", "spatial-dropout") or pair[1] not in ("none", "sqrt"):
             raise ValueError("Unsupported policy/loss variant")
         if pair in variants:
             raise ValueError("Duplicate candidate configuration")
@@ -246,6 +254,7 @@ class GPUSampler:
         return self
 
     def _run(self):
+        consecutive_timeouts = 0
         with self.path.open("a", encoding="utf-8") as stream:
             while not self.stop.is_set():
                 row = {"time_ns": time.time_ns(), "stage": self.stage()}
@@ -259,12 +268,20 @@ class GPUSampler:
                     if len(values) != 3 or not all(math.isfinite(value) for value in values):
                         raise ValueError("Unavailable GPU counters")
                     row.update(utilization_percent=values[0], memory_mib=values[1], power_w=values[2])
-                except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
+                    if consecutive_timeouts:
+                        row["recovered_after_timeouts"] = consecutive_timeouts
+                    consecutive_timeouts = 0
+                except subprocess.TimeoutExpired as exc:
+                    consecutive_timeouts += 1
+                    row.update(error=str(exc), consecutive_timeouts=consecutive_timeouts,
+                               retryable=consecutive_timeouts < 3)
+                except (OSError, ValueError, RuntimeError) as exc:
                     row["error"] = str(exc)
                 stream.write(json.dumps(row) + "\n")
                 stream.flush()
-                if "error" in row:
-                    # Missing GPU tooling is reported, not retried on every second.
+                if "error" in row and not row.get("retryable", False):
+                    # Missing tooling fails immediately; transient timeouts get
+                    # at most three consecutive attempts and remain in the log.
                     break
                 self.stop.wait(self.interval)
 
@@ -304,14 +321,16 @@ def stage_plan(root, output, data, manifest, device):
                        "--batch-size", str(train["batch_size"]), "--cpu-threads", str(train["cpu_threads"])]
             yield Stage(name + "/probe-" + selection, "probe", name, directory, command,
                         ("report.json",), limits["probe_seconds"])
-        for task, scenario in evaluation["scenarios"].items():
-            directory = base / ("eval-" + task)
-            command = [sys.executable, "-m", "valorant_lab.cli", "evaluate", "--model", str(training / "best.zip"),
-                       "--scenario", str(contained(root, scenario)), "--output", str(directory), "--split", "dev"]
-            for key in ("seed", "episodes", "workers", "cpu_threads", "device"):
-                command.extend(["--" + key.replace("_", "-"), str(evaluation[key])])
-            yield Stage(name + "/eval-" + task, "evaluate", name, directory, command,
-                        ("report.json",), limits["evaluate_seconds"])
+        for selection in evaluation.get("checkpoints", ["best"]):
+            for task, scenario in evaluation["scenarios"].items():
+                key = "eval-" + ("latest-" if selection == "latest" else "") + task
+                directory = base / key
+                command = [sys.executable, "-m", "valorant_lab.cli", "evaluate", "--model", str(training / (selection + ".zip")),
+                           "--scenario", str(contained(root, scenario)), "--output", str(directory), "--split", "dev"]
+                for option in ("seed", "episodes", "workers", "cpu_threads", "device"):
+                    command.extend(["--" + option.replace("_", "-"), str(evaluation[option])])
+                yield Stage(name + "/" + key, "evaluate", name, directory, command,
+                            ("report.json",), limits["evaluate_seconds"])
 
 
 def artifacts_for(root, stage):

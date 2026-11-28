@@ -33,7 +33,8 @@ def workspace(tmp_path, monkeypatch):
 
 
 def test_help_needs_no_gpu_or_optional_packages():
-    result = subprocess.run([sys.executable, str(SCRIPT), "--help"], capture_output=True, text=True)
+    result = subprocess.run([sys.executable, "-X", "utf8", str(SCRIPT), "--help"],
+                            capture_output=True, text=True, encoding="utf-8")
     assert result.returncode == 0
     assert "--check-only" in result.stdout and "--ssh-target" in result.stdout
     assert "--runtime" not in result.stdout and "--display-worker" not in result.stdout

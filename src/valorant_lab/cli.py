@@ -67,11 +67,27 @@ def make_vector_env(scenario, count, seed):
 
 def train(args):
     import torch
+    import math
+    import signal
     from stable_baselines3 import PPO
-    from .learning import POLICY_KWARGS, TrainingCallback, metadata, save_model
+    from .learning import POLICY_KWARGS, TrainingCallback, metadata, save_model, initialize_ppo_from_bc
+    from .online_learning import RehearsalPPO
+    if (not math.isfinite(args.learning_rate) or args.learning_rate <= 0
+            or not math.isfinite(args.entropy_coef) or args.entropy_coef < 0
+            or not math.isfinite(args.target_kl) or args.target_kl <= 0):
+        raise ValueError("PPO learning rate/KL must be positive and entropy coefficient nonnegative")
+    resume_overrides = {key: getattr(args, option, None) for key, option in
+                        (("learning_rate", "resume_learning_rate"), ("target_kl", "resume_target_kl"))}
+    resume_overrides = {key: value for key, value in resume_overrides.items() if value is not None}
+    if resume_overrides and not args.resume:
+        raise ValueError("Resume overrides require --resume")
+    if any(not math.isfinite(value) or value <= 0 for value in resume_overrides.values()):
+        raise ValueError("Resume overrides must be positive and finite")
     torch.set_num_threads(args.cpu_threads)
     output = Path(args.output).resolve()
     output.mkdir(parents=True, exist_ok=True)
+    if not args.resume and ((output / "latest.zip").exists() or (output / "checkpoints").exists()):
+        raise ValueError("PPO output already contains training artifacts; use --resume or a fresh directory")
     scenario = Path(args.scenario).resolve()
     config = load_scenario(scenario)
     parent_meta = require_contract(args.resume or args.init_bc, config) if args.resume or args.init_bc else {}
@@ -79,35 +95,84 @@ def train(args):
         raise ValueError("--init-bc requires a BC checkpoint; use --resume for PPO")
     if args.resume and parent_meta.get("kind") != "ppo":
         raise ValueError("--resume requires PPO; use --init-bc for a BC checkpoint")
+    rehearsal_data = getattr(args, "rehearsal_data", None)
+    separate_critic = getattr(args, "separate_critic", False)
+    if args.resume and bool(parent_meta.get("rehearsal")) != bool(rehearsal_data):
+        raise ValueError("Resume must preserve the checkpoint's rehearsal mode and original training data")
+    algorithm = RehearsalPPO if rehearsal_data else PPO
     manifest = {"scenario": config, "seed": args.seed,
         "device": args.device, "environments": args.envs, "additional_timesteps": args.steps,
-        "resume": args.resume, "init_bc": args.init_bc, "packages": {p: importlib.metadata.version(p)
+        "resume": args.resume, "init_bc": args.init_bc, "resume_overrides": resume_overrides,
+        "packages": {p: importlib.metadata.version(p)
             for p in ["torch", "gymnasium", "stable-baselines3", "numpy"]}}
     (output / ("run-" + str(time.time_ns()) + ".json")).write_text(json.dumps(manifest, indent=2))
     env = make_vector_env(scenario, args.envs, args.seed)
     meta = metadata(config, "ppo", episodes=parent_meta.get("episodes", []),
                     test_only=parent_meta.get("test_only", False), parent=args.resume or args.init_bc)
     model = None
+    previous_term = signal.getsignal(signal.SIGTERM)
+    def terminate_training(_signum, _frame):
+        raise KeyboardInterrupt("PPO training deadline or termination requested")
+    signal.signal(signal.SIGTERM, terminate_training)
     try:
         if args.resume:
-            model = PPO.load(args.resume, env=env, device=args.device)
+            # Loading otherwise reseeds the new environment with the checkpoint's
+            # old seed, silently discarding --seed and repeating its scene stream.
+            # Keep fitted weights and Adam moments; change saved hyperparameters
+            # only through explicit resume-specific options.
+            model = algorithm.load(args.resume, env=env, device=args.device, seed=args.seed, **resume_overrides)
+            if "learning_rate" in resume_overrides:
+                # Loading Adam also restores its param-group LR. Match the new
+                # constant schedule before the first update without resetting moments.
+                for group in model.policy.optimizer.param_groups:
+                    group["lr"] = resume_overrides["learning_rate"]
+            if separate_critic and model.policy.share_features_extractor:
+                raise ValueError("Cannot split the critic on resume; initialize a new experiment from BC")
             model.tensorboard_log = str(output / "tensorboard")
         else:
-            model = PPO("CnnPolicy", env, n_steps=args.rollout, batch_size=args.batch_size,
-                n_epochs=4, learning_rate=3e-4, gamma=0.99, seed=args.seed,
-                policy_kwargs=POLICY_KWARGS, device=args.device, verbose=1, tensorboard_log=str(output / "tensorboard"))
+            options = dict(n_steps=args.rollout, batch_size=args.batch_size, n_epochs=4,
+                learning_rate=args.learning_rate, gamma=0.99, seed=args.seed,
+                ent_coef=args.entropy_coef, target_kl=args.target_kl,
+                device=args.device, verbose=1, tensorboard_log=str(output / "tensorboard"))
             if args.init_bc:
-                teacher = PPO.load(args.init_bc, device=args.device)
-                model.policy.load_state_dict(teacher.policy.state_dict())
-                del teacher
+                model = initialize_ppo_from_bc(env, args.init_bc, separate_critic=separate_critic,
+                                               algorithm_class=algorithm, **options)
+            else:
+                model = algorithm("CnnPolicy", env, policy_kwargs={**POLICY_KWARGS,
+                                  "share_features_extractor": not separate_critic}, **options)
+        if rehearsal_data:
+            from .dataset import load_episodes
+            episodes = load_episodes(rehearsal_data, config, allow_test_data=meta["test_only"])
+            details = model.configure_rehearsal(episodes, config,
+                updates=getattr(args, "rehearsal_updates", 4),
+                batch_size=getattr(args, "rehearsal_batch_size", 256), seed=args.seed)
+            print(json.dumps({"event": "rehearsal_ready", **details}), flush=True)
+        meta.update(policy_variant=parent_meta.get("policy_variant", "legacy"),
+                    resume_overrides=resume_overrides,
+                    online_training_seed_partition=[0, 100000],
+                    training_rng_seed=model.seed, ppo_rollout_steps=model.n_steps,
+                    ppo_batch_size=model.batch_size, ppo_epochs=model.n_epochs,
+                    ppo_learning_rate=float(model.lr_schedule(1)), entropy_coef=model.ent_coef,
+                    target_kl=model.target_kl,
+                    separate_critic=not model.policy.share_features_extractor,
+                    feature_dropout_disabled=not any(isinstance(m, torch.nn.Dropout) and m.p > 0
+                                                    for m in model.policy.modules()))
+        print(json.dumps({"event": "ppo_ready", **{key: meta[key] for key in
+            ("training_rng_seed", "ppo_rollout_steps", "ppo_batch_size", "ppo_epochs",
+             "ppo_learning_rate", "entropy_coef", "target_kl")}}), flush=True)
         callback = TrainingCallback(output, meta, args)
         model.learn(total_timesteps=args.steps, callback=callback, reset_num_timesteps=not bool(args.resume))
     except KeyboardInterrupt:
         print("Interrupted; saving the current checkpoint.")
     finally:
-        if model is not None:
-            save_model(model, output / "latest.zip", meta)
-        env.close()
+        try:
+            if model is not None:
+                save_model(model, output / "latest.zip", meta)
+        finally:
+            try:
+                env.close()
+            finally:
+                signal.signal(signal.SIGTERM, previous_term)
 
 
 def evaluate(args):
@@ -177,6 +242,18 @@ def main():
     training.add_argument("--rollout", type=int, default=256)
     training.add_argument("--batch-size", type=int, default=64)
     training.add_argument("--cpu-threads", type=int, default=4)
+    training.add_argument("--learning-rate", type=float, default=3e-4)
+    training.add_argument("--entropy-coef", type=float, default=0.)
+    training.add_argument("--target-kl", type=float, default=.02)
+    training.add_argument("--resume-learning-rate", type=float,
+                          help="Explicit constant learning-rate override for --resume; otherwise preserve checkpoint")
+    training.add_argument("--resume-target-kl", type=float,
+                          help="Explicit KL early-stop target override for --resume; otherwise preserve checkpoint")
+    training.add_argument("--separate-critic", action="store_true",
+                          help="Separate actor/critic visual encoders when initializing from BC")
+    training.add_argument("--rehearsal-data", help="Optional accepted human demonstrations; train split only")
+    training.add_argument("--rehearsal-updates", type=int, default=4)
+    training.add_argument("--rehearsal-batch-size", type=int, default=256)
     training.add_argument("--checkpoint-every", type=int, default=10000)
     initial = training.add_mutually_exclusive_group()
     initial.add_argument("--resume")
@@ -189,6 +266,11 @@ def main():
     evaluation.add_argument("--model", required=True)
     evaluation.add_argument("--episodes", type=int, default=10)
     evaluation.add_argument("--device", default="auto")
+    evaluation.add_argument("--action-selection", choices=["mode", "sample"], default="mode",
+                            help="Default greedy policy, or opt-in categorical sampling diagnostic")
+    evaluation.add_argument("--action-temperature", type=float, default=1.)
+    evaluation.add_argument("--sampling-seed", type=int, default=0,
+                            help="Independent policy-sampling replicate; engine seed bank is unchanged")
     evaluation.add_argument("--cpu-threads", type=int, default=4,
                             help="PyTorch CPU thread budget shared across evaluation workers")
     evaluation.add_argument("--workers", type=int, default=1,
@@ -230,11 +312,13 @@ def main():
                     help="Total decoded train+validation cache budget in MiB (default: 1024)")
     bc.add_argument("--checkpoint-every-epochs", type=int, default=1,
                     help="Persist latest and best every N epochs, plus first/final; validate every epoch")
-    bc.add_argument("--policy-variant", choices=["legacy", "normalized", "normalized-relu"], default="legacy",
+    bc.add_argument("--policy-variant", choices=["legacy", "normalized", "normalized-relu", "normalized-dropout", "spatial-dropout"], default="legacy",
                     help="Opt-in normalized visual features; legacy saved policies remain compatible")
     bc.add_argument("--class-balance", choices=["none", "sqrt"], default="none",
                     help="Train-only bounded inverse-square-root class weights; retain negative examples")
     bc.add_argument("--class-weight-cap", type=float, default=8., help="Maximum rare/majority class weight ratio")
+    bc.add_argument("--initial-idle-policy", choices=["keep", "skip"], default="keep",
+                    help="Opt-in train-only exclusion of leading complete no-ops; RGB history and validation stay intact")
     bc.add_argument("--resume", action="store_true", help="Resume the last complete BC checkpoint in --output")
     bc.add_argument("--allow-test-data", action="store_true", help="Pipeline checks only; marks model test_only")
     bc.set_defaults(func=bc_train)
@@ -266,7 +350,7 @@ def main():
                          help="Scenario JSON; smoke defaults to navigation self-test, other commands to movement/combat")
         sub.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
-    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every", "epochs", "eval_episodes", "cache_mib", "checkpoint_every_epochs", "workers"):
+    for name in ("steps", "envs", "rollout", "batch_size", "episodes", "cpu_threads", "checkpoint_every", "epochs", "eval_episodes", "cache_mib", "checkpoint_every_epochs", "workers", "rehearsal_updates", "rehearsal_batch_size"):
         if hasattr(args, name) and getattr(args, name) < 1:
             parser.error(f"--{name.replace('_', '-')} must be positive")
     if args.command == "train" and args.rollout * args.envs < args.batch_size:
